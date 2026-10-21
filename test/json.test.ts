@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractJson, firstBalancedObject, JsonExtractError } from '../src/ai/json';
-import { completeJson, type AIProvider, type AIRequest } from '../src/ai/provider';
+import { AIEmptyReplyError, completeJson, type AIProvider, type AIRequest } from '../src/ai/provider';
 
 describe('extractJson', () => {
   it('reads plain JSON', () => {
@@ -47,5 +47,20 @@ describe('completeJson', () => {
     expect(res.value.ok).toBe(true);
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain('could not be parsed');
+  });
+
+  it('does not ask again for JSON when the reply is empty', async () => {
+    let calls = 0;
+    const provider: AIProvider = {
+      name: async () => 'fake',
+      listModels: async () => [],
+      modelFor: async () => undefined,
+      complete: async () => {
+        calls++;
+        return { text: '  \n', model: 'GPT Sol' };
+      },
+    };
+    await expect(completeJson(provider, req, (v) => v)).rejects.toBeInstanceOf(AIEmptyReplyError);
+    expect(calls).toBe(1);
   });
 });

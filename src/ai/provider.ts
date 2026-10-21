@@ -44,6 +44,9 @@ export interface AIProvider {
 
 export class AIUnavailableError extends Error {}
 
+/** The model answered with no text at all. Asking again for JSON won't help, so it isn't retried. */
+export class AIEmptyReplyError extends AIUnavailableError {}
+
 /**
  * Asks for JSON, and if the reply doesn't parse, asks once more with the parse error.
  * `normalize` turns the parsed value into a trusted shape (dropping anything malformed).
@@ -55,6 +58,9 @@ export async function completeJson<T>(
   token?: CancellationToken,
 ): Promise<{ value: T; model: string }> {
   const first = await provider.complete(req, token);
+  if (!first.text.trim()) {
+    throw new AIEmptyReplyError(`${first.model} sent back an empty reply. Try again, or pick another model with "codelearn: Choose AI models".`);
+  }
   try {
     return { value: normalize(extractJson(first.text)), model: first.model };
   } catch (e) {

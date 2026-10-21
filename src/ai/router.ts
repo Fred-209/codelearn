@@ -8,14 +8,16 @@ import type { UsageEntry } from '../store/usageReport';
 
 /** Sends each request to the provider chosen by codelearn.provider. */
 export class ProviderRouter implements AIProvider {
-  readonly copilot = new VsCodeLmProvider();
+  readonly copilot: VsCodeLmProvider;
   readonly claude: ClaudeCodeProvider;
 
   constructor(
     context: vscode.ExtensionContext,
     /** Called after every successful request, for the usage tally. */
     private readonly onUsage?: (entry: Omit<UsageEntry, 'repo'>) => void,
+    log?: vscode.LogOutputChannel,
   ) {
+    this.copilot = new VsCodeLmProvider(log);
     this.claude = new ClaudeCodeProvider(vscode.Uri.joinPath(context.globalStorageUri, 'claude-code'));
   }
 
