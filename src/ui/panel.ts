@@ -2,13 +2,15 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import type { Zoom } from '../ai/prompts';
 import { askPrompt } from '../ai/prompts';
+import type { ExampleSearch } from '../learn/examples';
 import { Explainer, ExplainTarget } from '../learn/explain';
 import { openAt, relPath } from '../learn/files';
 import { Lessons } from '../learn/lessons';
+import { placesFor } from '../learn/places';
 import { reportError, Services } from '../services';
 import type { Depth } from '../store/types';
 import type { PanelHost, WalkState } from '../walkthrough/controller';
-import { page, renderBackBar, renderView, View } from './render';
+import { MapItemType, page, renderBackBar, renderCodebase, renderView, View } from './render';
 import type { RepoMap } from '../store/types';
 
 /** A page in the tab's history, and how to show it again. */
@@ -18,10 +20,14 @@ interface Page {
   open: () => unknown;
 }
 
-function mapItemTitle(map: RepoMap, type: string, id: string): string {
+function mapItemTitle(map: RepoMap, type: MapItemType, id: string): string {
   switch (type) {
     case 'overview':
       return `${map.repoName} overview`;
+    case 'architecture':
+      return `${map.repoName} architecture`;
+    case 'part':
+      return map.architecture?.parts.find((p) => p.id === id)?.name ?? 'Part';
     case 'area':
       return map.areas.find((a) => a.id === id)?.name ?? 'Area';
     case 'flow':
@@ -54,6 +60,12 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   private history: Page[] = [];
   private current: Page | undefined;
   private goingBack = false;
+  /** Set when the page changed while the tab was hidden, so it is drawn again when shown. */
+  private stale = false;
+  /** The page on show, and whether its script has loaded; updates wait until it has. */
+  private pageId = '';
+  private loaded = false;
+  private pending: { id: string; html: string }[] = [];
 
   constructor(
     private readonly s: Services,
@@ -73,14 +85,42 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     const base = { kind: 'lesson' as const, concept, depth: d, status, answers: [], names };
 
     const cached = await this.lessons.cached(concept, d);
-    if (cached) return this.show({ ...base, lesson: cached });
+    if (cached) return this.showLesson({ ...base, lesson: cached });
 
     const view: View = { ...base, generating: `Writing a ${d === 'scratch' ? 'from-scratch' : d} lesson on ${concept.name}…` };
     this.show(view);
     await this.run(`writing the lesson on ${concept.name}`, async (token) => {
       const lesson = await this.lessons.generate(concept, d, token);
-      if (this.view === view) this.show({ ...base, lesson });
+      if (this.view === view) void this.showLesson({ ...base, lesson });
     });
+  }
+
+  /** Shows a lesson, then searches the repo for real uses of it (no AI) and adds them when found. */
+  private async showLesson(view: Extract<View, { kind: 'lesson' }>): Promise<void> {
+    this.show({ ...view, searching: true });
+    let examples: ExampleSearch | undefined;
+    try {
+      examples = await this.lessons.examples(view.concept, view.lesson);
+    } catch (e) {
+      this.s.log.warn(`Looking for examples of ${view.concept.name} failed: ${e instanceof Error ? e.message : e}`);
+    }
+    const now = this.view;
+    if (now?.kind !== 'lesson' || now.concept.id !== view.concept.id || now.lesson !== view.lesson) return;
+    const next = { ...now, searching: false, examples };
+    this.view = next;
+    // Only that section changes, so the reader keeps their place.
+    this.patch('codebase', renderCodebase(next));
+  }
+
+  /** Replaces one element of the page on show, once the page can take it. */
+  private patch(id: string, html: string): void {
+    if (!this.panel?.visible) {
+      this.stale = true;
+    } else if (this.loaded) {
+      void this.panel.webview.postMessage({ type: 'replace', id, html });
+    } else {
+      this.pending.push({ id, html });
+    }
   }
 
   // ---- what's happening here ----
@@ -103,7 +143,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
       zoom === 'line' && target.ladder && target.scope !== undefined
         ? { smaller: target.scope > 0, larger: target.scope < target.ladder.length - 1 }
         : undefined;
-    const base = { kind: 'explain' as const, file: relPath(target.uri), lines, zoom, names, scope };
+    const base = { kind: 'explain' as const, file: relPath(target.uri), lines, zoom, names, scope, places: await this.places(target.uri) };
     const cached = force ? undefined : await this.explainer.cached(zoom, target);
     if (cached) return this.show({ ...base, explanation: cached });
 
@@ -121,7 +161,14 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     const target: ExplainTarget = { uri, startLine: Math.max(0, line - 1), endLine: line - 1 };
     this.explainTarget = target;
     this.highlight(undefined);
-    const base = { kind: 'explain' as const, file: relPath(uri), lines: `line ${line}`, zoom: 'line' as const, names: await this.names() };
+    const base = {
+      kind: 'explain' as const,
+      file: relPath(uri),
+      lines: `line ${line}`,
+      zoom: 'line' as const,
+      names: await this.names(),
+      places: await this.places(uri),
+    };
     const cached = await this.explainer.getQuickCached(word, uri);
     if (cached) return this.show({ ...base, explanation: cached });
     const view: View = { ...base, generating: `Explaining ${word}…` };
@@ -134,7 +181,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
 
   // ---- map items ----
 
-  async openMapItem(type: 'overview' | 'area' | 'flow' | 'term' | 'convention', id: string): Promise<void> {
+  async openMapItem(type: MapItemType, id: string): Promise<void> {
     const map = await this.s.store.getMap();
     if (!map) {
       vscode.window.showInformationMessage('codelearn: build the map first.', 'Build map').then((c) => {
@@ -213,9 +260,16 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   private show(view: View): void {
     if (view.kind !== 'explain') this.highlight(undefined);
     this.view = view;
-    const panel = this.ensurePanel();
+    this.render(this.ensurePanel(), view);
+  }
+
+  private render(panel: vscode.WebviewPanel, view: View): void {
+    this.stale = false;
+    this.loaded = false;
+    this.pending = [];
     panel.title = titleFor(view);
     const nonce = randomBytes(16).toString('base64');
+    this.pageId = nonce;
     const previous = view.kind === 'walkthrough' ? undefined : this.history.at(-1);
     panel.webview.html = page(`${previous ? renderBackBar(previous.title) : ''}${renderView(view)}`, nonce, panel.webview.cspSource);
   }
@@ -233,6 +287,9 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     );
     this.panel.iconPath = vscode.Uri.joinPath(this.s.context.extensionUri, 'media', 'codelearn.svg');
     this.panel.webview.onDidReceiveMessage((m) => this.onMessage(m).catch((e) => reportError(this.s, 'Something went wrong', e)));
+    this.panel.onDidChangeViewState((e) => {
+      if (e.webviewPanel.visible && this.stale && this.view) this.render(e.webviewPanel, this.view);
+    });
     this.panel.onDidDispose(() => {
       this.highlight(undefined);
       const wasWalk = this.view?.kind === 'walkthrough';
@@ -266,9 +323,21 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     return Object.fromEntries((map?.concepts ?? []).map((c) => [c.id, c.name]));
   }
 
+  /** The parts, areas and flows of the map that a file belongs to. */
+  private async places(uri: vscode.Uri) {
+    const map = await this.s.store.getMap();
+    return map ? placesFor(map, relPath(uri)) : [];
+  }
+
   private async onMessage(m: Record<string, string>): Promise<void> {
     const v = this.view;
     switch (m.action) {
+      case 'loaded':
+        if (m.page === this.pageId) {
+          this.loaded = true;
+          for (const p of this.pending.splice(0)) void this.panel?.webview.postMessage({ type: 'replace', ...p });
+        }
+        return;
       case 'back':
         return this.back();
       case 'lesson':
@@ -300,7 +369,16 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
       case 'ask':
         return this.ask();
       case 'map':
-        return this.openMapItem(m.type as 'area', m.id);
+        return this.openMapItem(m.type as MapItemType, m.id);
+      case 'explore':
+        await vscode.commands.executeCommand('codelearn.exploreArea', m.id);
+        return;
+      case 'investigate':
+        await vscode.commands.executeCommand('codelearn.investigate');
+        return;
+      case 'build-map':
+        await vscode.commands.executeCommand('codelearn.buildMap');
+        return;
       case 'walk-flow':
         return this.actions.walkFlow(m.id);
       case 'walk-range':

@@ -24,7 +24,13 @@ export function migrateMap(raw: unknown): RepoMap | undefined {
     m = { ...m, builtFrom: undefined };
     version = 2;
   }
-  // Future steps go here: if (version < 3) { ...; version = 3; }
+  if (version < 3) {
+    // v3 reads templates (.html, .liquid, ...) too. These maps never hashed them, so they
+    // mustn't show up as changed files. Everything else v3 adds is optional.
+    m = { ...m, depth: 'quick', templatesUntracked: true };
+    version = 3;
+  }
+  // Future steps go here: if (version < 4) { ...; version = 4; }
 
   return {
     ...(m as unknown as RepoMap),
@@ -33,8 +39,8 @@ export function migrateMap(raw: unknown): RepoMap | undefined {
     generatedAt: str(m.generatedAt),
     model: str(m.model),
     overview: str(m.overview),
-    areas: arr(m.areas),
-    flows: arr(m.flows),
+    areas: arr<RepoMap['areas'][number]>(m.areas).map((a) => ({ ...a, paths: arr(a.paths) })),
+    flows: arr<RepoMap['flows'][number]>(m.flows).map((f) => ({ ...f, files: arr(f.files) })),
     concepts: arr<RepoMap['concepts'][number]>(m.concepts).map((c) => ({
       ...c,
       match: arr(c.match),
@@ -57,6 +63,7 @@ export function migrateLesson(raw: unknown): Lesson | undefined {
     comparisons: arr(raw.comparisons),
     pitfalls: arr(raw.pitfalls),
     citations: arr(raw.citations),
+    docs: arr<{ title?: unknown; url?: unknown }>(raw.docs).filter((d) => typeof d?.url === 'string' && /^https:\/\//.test(d.url)) as Lesson['docs'],
     usage: str(raw.usage),
     model: str(raw.model),
     generatedAt: str(raw.generatedAt),

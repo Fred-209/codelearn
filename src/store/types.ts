@@ -2,7 +2,7 @@
 // extension storage on this machine; nothing is written into the repo.
 
 /** Bump when RepoMap changes shape, and add a step to migrateMap so saved maps keep working. */
-export const MAP_VERSION = 2;
+export const MAP_VERSION = 3;
 
 /** A pointer into the code backing a claim. `quote` lets us re-find the line if it moved. */
 export interface Citation {
@@ -33,6 +33,8 @@ export interface Concept {
   docsSite?: string;
   /** Search words for docs and videos, e.g. "C# LINQ Where". */
   searchQuery?: string;
+  /** Code that shows the concept in use, exactly as written, e.g. `data-bind="`: found by search for examples (v3). */
+  patterns?: string[];
 }
 
 export interface Area {
@@ -40,6 +42,29 @@ export interface Area {
   name: string;
   summary: string;
   paths: string[]; // folder or file globs, workspace-relative
+  /** A fuller explanation, from a Thorough map or "Explore deeper" (v3). Markdown. */
+  details?: string;
+  /** The files that matter most here, and the job each does (v3). */
+  keyFiles?: KeyFile[];
+}
+
+export interface KeyFile {
+  file: string;
+  role: string;
+}
+
+/** One stop along a flow: a line of real code and what happens there (v3). */
+export interface FlowStep {
+  file: string;
+  line: number; // 1-based
+  endLine?: number;
+  quote?: string;
+  title: string;
+  /** Markdown. */
+  body: string;
+  /** Concept ids or names at play in this step. */
+  concepts?: string[];
+  verified?: boolean;
 }
 
 export interface Flow {
@@ -49,6 +74,45 @@ export interface Flow {
   /** Files involved, in rough order of execution. */
   files: string[];
   entry?: Citation;
+  /** The flow step by step through the code, from a deep dive or "Investigate" (v3). */
+  steps?: FlowStep[];
+  /** Id of the architecture part it mostly runs in (v3). */
+  part?: string;
+  /** For flows added by "Investigate": what the learner asked (v3). */
+  question?: string;
+  /** Markdown: how the flow works, or the answer to the question (v3). */
+  details?: string;
+}
+
+/** A separately built or run piece of the software, e.g. a web app, a worker, a build step (v3). */
+export interface ArchitecturePart {
+  id: string;
+  name: string;
+  summary: string;
+  /** Folders or files it is made of. */
+  paths: string[];
+  /** Where it starts. */
+  entry?: Citation;
+  /** Where and how it runs, e.g. "in the browser", "Azure Function", "at build time". */
+  runs?: string;
+  /** A service outside this repository that the code talks to, e.g. an identity provider. */
+  external?: boolean;
+}
+
+export interface ArchitectureLink {
+  from: string; // part id
+  to: string; // part id
+  /** How they connect, e.g. "calls its REST API", "writes the files it serves". */
+  how: string;
+  /** Code that shows the connection. Without a verified one, the link is the AI's inference. */
+  evidence?: Citation;
+}
+
+export interface Architecture {
+  /** Markdown: how the parts fit together. */
+  summary: string;
+  parts: ArchitecturePart[];
+  links: ArchitectureLink[];
 }
 
 export interface GlossaryTerm {
@@ -84,6 +148,12 @@ export interface RepoMap {
   fileHashes: Record<string, string>;
   /** The branch and commit the map was last built or updated from (v2). */
   builtFrom?: { branch?: string; commit?: string };
+  /** 'quick': one overview request. 'thorough': a survey, a deep dive per flow, then a synthesis (v3). */
+  depth?: 'quick' | 'thorough';
+  /** How the software's parts fit together and where each runs (v3). */
+  architecture?: Architecture;
+  /** Set on maps built before codelearn read templates, so their missing hashes don't count as changes (v3). */
+  templatesUntracked?: boolean;
 }
 
 export type Depth = 'refresher' | 'standard' | 'scratch';
@@ -118,6 +188,17 @@ export interface Lesson {
   model: string;
   /** Hash of the cited files' contents when generated; differs -> stale. */
   sourceHash: string;
+  /** Code that shows the concept in use, exactly as written, for finding examples in any repo (v3). */
+  patterns?: string[];
+  /** Pages from the official documentation (v3). */
+  docs?: DocLink[];
+}
+
+export interface DocLink {
+  title: string;
+  url: string;
+  /** True when codelearn loaded the page and found it on the expected site. */
+  checked?: boolean;
 }
 
 export interface Explanation {

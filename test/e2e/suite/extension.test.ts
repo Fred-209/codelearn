@@ -11,6 +11,7 @@ import type { CodelearnTestApi } from '../../../src/extension';
 import type { Lesson, RepoMap, Walkthrough } from '../../../src/store/types';
 import { MAP_VERSION } from '../../../src/store/types';
 import { Explainer } from '../../../src/learn/explain';
+import { Lessons } from '../../../src/learn/lessons';
 
 const HANDLER = 'src/GetActivePaymentsHandler.cs';
 
@@ -21,7 +22,27 @@ const map: RepoMap = {
   model: 'test',
   overview: 'A tiny payments sample.',
   areas: [{ id: 'handlers', name: 'Handlers', summary: 'Request handlers', paths: ['src'] }],
-  flows: [{ id: 'get-active', name: 'Getting active payments', summary: 'Loads and filters payments.', files: [HANDLER] }],
+  flows: [
+    {
+      id: 'get-active',
+      name: 'Getting active payments',
+      summary: 'Loads and filters payments.',
+      files: [HANDLER],
+      part: 'api',
+      steps: [
+        { file: HANDLER, line: 12, quote: 'await _payments.GetByAccountAsync(query.AccountId, ct)', title: 'Load', body: "Loads the account's payments.", verified: true },
+        { file: HANDLER, line: 15, quote: '.Where(p => p.Amount > 0)', title: 'Filter', body: 'Keeps positive amounts.', concepts: ['linq'], verified: true },
+      ],
+    },
+  ],
+  architecture: {
+    summary: 'An API with one handler.',
+    parts: [
+      { id: 'api', name: 'Payments API', summary: 'Answers payment queries.', paths: ['src'], runs: 'Azure App Service' },
+      { id: 'db', name: 'Payments database', summary: 'Stores payments.', paths: [], external: true },
+    ],
+    links: [{ from: 'api', to: 'db', how: 'reads payments', evidence: { file: HANDLER, line: 12, quote: 'GetByAccountAsync', verified: true } }],
+  },
   concepts: [
     {
       id: 'linq',
@@ -210,6 +231,43 @@ describe('codelearn in VS Code', () => {
     const first = api.tree.getTreeItem(roots[0]);
     assert.match(String(first.label), /changed: update the map/);
     assert.strictEqual(first.command?.command, 'codelearn.updateMap');
+  });
+
+  it('shows the architecture in the sidebar, and which AI is in use', async () => {
+    const roots = await api.tree.getChildren();
+    const labels = roots.map((r) => String(api.tree.getTreeItem(r).label));
+    assert.ok(labels.includes('Architecture'), labels.join(', '));
+    assert.match(labels[labels.length - 1], /^AI: /);
+    const parts = (await api.tree.getChildren(roots[labels.indexOf('Architecture')])).map((n) => api.tree.getTreeItem(n));
+    assert.deepStrictEqual(
+      parts.map((p) => p.label),
+      ['Payments API', 'Payments database'],
+    );
+    assert.strictEqual(parts[0].description, 'Azure App Service');
+    await vscode.commands.executeCommand('codelearn.openMapItem', 'architecture', '');
+    await until(() => tabLabels().includes('codelearn map'), 'map tab');
+  });
+
+  it('walks a followed flow from its saved steps, with no AI request', async () => {
+    await vscode.commands.executeCommand('codelearn.startFlowWalkthrough', 'get-active');
+    await until(() => api.walks.current !== undefined, 'the walkthrough');
+    assert.deepStrictEqual(
+      api.walks.current!.walkthrough.steps.map((s) => [s.title, s.line, s.verified]),
+      [
+        ['Load', 12, true],
+        ['Filter', 15, true],
+      ],
+    );
+    assert.strictEqual(api.walks.current!.walkthrough.model, 'the repo map');
+    await vscode.commands.executeCommand('codelearn.walkthrough.end');
+  });
+
+  it('finds real uses of a concept in the repo for its lesson', async () => {
+    const found = await new Lessons(api.services).examples(map.concepts[0]);
+    assert.ok(
+      found.examples.some((e) => e.file === HANDLER && e.line === 15),
+      JSON.stringify(found.examples),
+    );
   });
 
   it('opens map items such as flows in the panel', async () => {

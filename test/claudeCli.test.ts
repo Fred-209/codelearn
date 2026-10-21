@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claudeArgs, claudeCandidates, ClaudeCliError, claudeInput, claudeModelFor, parseClaudeOutput } from '../src/ai/claudeCli';
+import { claudeArgs, claudeCandidates, ClaudeCliError, claudeInput, claudeModelFor, denyRules, parseClaudeOutput } from '../src/ai/claudeCli';
 import { chooseProvider } from '../src/ai/providerChoice';
 
 const ok = (result: string, usage: Record<string, { outputTokens: number }> = { 'claude-sonnet-5-5': { outputTokens: 10 } }) =>
@@ -33,12 +33,35 @@ describe('claudeArgs / claudeInput', () => {
     expect(claudeArgs('opus', 'high').slice(-2)).toEqual(['--effort', 'high']);
   });
 
+  it('allows only read-only tools on the repo folder for lookups, never secret files', () => {
+    const args = claudeArgs('sonnet', 'medium', { root: '/home/fred/payments', maxTurns: 8 });
+    expect(args[args.indexOf('--tools') + 1]).toBe('Read,Grep,Glob');
+    expect(args[args.indexOf('--add-dir') + 1]).toBe('/home/fred/payments');
+    expect(args[args.indexOf('--max-turns') + 1]).toBe('8');
+    expect(args).toContain('Read(//home/fred/payments/**/.env*)');
+    expect(args).toContain('Read(//home/fred/payments/**/.git/**)');
+    // Each list-taking flag is followed by another flag, so values can't run together.
+    for (const flag of ['--tools', '--add-dir', '--disallowedTools']) {
+      const next = args.slice(args.indexOf(flag) + 1).findIndex((a) => a.startsWith('--'));
+      expect(next).toBeGreaterThan(0);
+    }
+    expect(denyRules('C:\\Users\\fred\\payments')[0]).toBe('Read(//c/Users/fred/payments/**/.env*)');
+  });
+
   it('sends the instructions ahead of the content on stdin', () => {
     expect(claudeInput('Do X.', 'code')).toBe('Do X.\n\n---\n\ncode');
   });
 });
 
 describe('parseClaudeOutput', () => {
+  it('reports the turns taken, and running out of turns', () => {
+    const done = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '{}', num_turns: 4, modelUsage: { 'claude-sonnet-5-5': { outputTokens: 9 } } });
+    expect(parseClaudeOutput(done).turns).toBe(4);
+    const out = JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: false, num_turns: 9 });
+    expect(() => parseClaudeOutput(out)).toThrow(expect.objectContaining({ outOfTurns: true }));
+  });
+
+
   it('returns the text and the model that wrote it', () => {
     const usage = { 'claude-haiku-5-5': { outputTokens: 3 }, 'claude-opus-5-5': { outputTokens: 900 } };
     expect(parseClaudeOutput(`${ok('{"a":1}', usage)}\n`)).toMatchObject({ text: '{"a":1}', model: 'claude-opus-5-5' });

@@ -3,12 +3,19 @@ import type { Store } from '../store/store';
 import type { ConceptKind, RepoMap } from '../store/types';
 
 type Node =
-  | { type: 'root'; id: 'stale' | 'overview' | 'areas' | 'flows' | 'concepts' | 'glossary' | 'conventions' }
+  | { type: 'root'; id: 'stale' | 'overview' | 'architecture' | 'areas' | 'flows' | 'concepts' | 'glossary' | 'conventions' | 'models' }
   | { type: 'kind'; kind: ConceptKind }
   | { type: 'item'; item: vscode.TreeItem };
 
+/** Which AI answers, for the sidebar's "AI models" line. */
+export interface ModelsInUse {
+  /** e.g. "GitHub Copilot"; undefined when no AI is available. */
+  provider?: string;
+  slots: { label: string; model?: string; effort: string; auto: boolean }[];
+}
+
 const KIND_LABEL: Record<ConceptKind, string> = {
-  architecture: 'Architecture',
+  architecture: 'Architecture concepts',
   pattern: 'Patterns',
   library: 'Libraries',
   language: 'Language features',
@@ -22,8 +29,18 @@ export class MapTree implements vscode.TreeDataProvider<Node> {
   readonly onDidChangeTreeData = this.changed.event;
   private changedFiles = new Set<string>();
 
-  constructor(private readonly store: Store) {
+  constructor(
+    private readonly store: Store,
+    private readonly modelsInUse: () => Promise<ModelsInUse>,
+  ) {
     store.onDidChange(() => this.changed.fire());
+  }
+
+  private models: ModelsInUse | undefined;
+
+  /** Redraws the tree, e.g. after the AI settings change. */
+  refresh(): void {
+    this.changed.fire();
   }
 
   /** Files that differ from the map, from the check on startup (no AI involved). */
@@ -74,6 +91,14 @@ export class MapTree implements vscode.TreeDataProvider<Node> {
         item.description = this.builtFromText().replace(/^ from /, '');
         return item;
       }
+      case 'architecture': {
+        const item = collapsed('Architecture', 'type-hierarchy-sub');
+        item.command = { command: 'codelearn.openMapItem', title: 'Open', arguments: ['architecture', ''] };
+        item.tooltip = 'The parts of the system, where each runs and how they connect, with a diagram';
+        return item;
+      }
+      case 'models':
+        return this.modelsItem();
       case 'areas':
         return collapsed('Areas', 'folder-library');
       case 'flows':
@@ -92,15 +117,18 @@ export class MapTree implements vscode.TreeDataProvider<Node> {
     this.builtFrom = map?.builtFrom;
     if (!map) return [];
     if (!n) {
+      this.models = await this.modelsInUse().catch(() => undefined);
       const roots: Node[] = [
         ...(this.changedFiles.size ? [{ type: 'root', id: 'stale' } as const] : []),
         { type: 'root', id: 'overview' },
+        ...(map.architecture?.parts.length ? [{ type: 'root', id: 'architecture' } as const] : []),
         { type: 'root', id: 'flows' },
         { type: 'root', id: 'areas' },
         { type: 'root', id: 'concepts' },
       ];
       if (map.glossary.length) roots.push({ type: 'root', id: 'glossary' });
       if (map.conventions.length) roots.push({ type: 'root', id: 'conventions' });
+      roots.push({ type: 'root', id: 'models' });
       return roots;
     }
     if (n.type === 'root') return this.rootChildren(map, n.id);
@@ -121,6 +149,18 @@ export class MapTree implements vscode.TreeDataProvider<Node> {
     return [];
   }
 
+  /** "AI: GitHub Copilot · Opus 5.5, Sonnet 5.5, Haiku 5.5", which opens the model picker. */
+  private modelsItem(): vscode.TreeItem {
+    const m = this.models ?? { slots: [] };
+    const item = new vscode.TreeItem(m.provider ? `AI: ${m.provider}` : 'AI: none found', vscode.TreeItemCollapsibleState.None);
+    const names = [...new Set(m.slots.map((s) => s.model).filter((x): x is string => !!x))];
+    item.description = m.provider ? names.join(', ') : 'click to set up';
+    item.iconPath = new vscode.ThemeIcon(m.provider ? 'sparkle' : 'warning');
+    item.tooltip = new vscode.MarkdownString(modelsTooltip(m));
+    item.command = { command: 'codelearn.chooseModels', title: 'Choose AI models' };
+    return item;
+  }
+
   private rootChildren(map: RepoMap, id: string): Node[] {
     const item = (label: string, args: [string, string], icon: string, tooltip?: string, contextValue?: string): Node => {
       const t = new vscode.TreeItem(label);
@@ -130,15 +170,21 @@ export class MapTree implements vscode.TreeDataProvider<Node> {
       t.command = { command: 'codelearn.openMapItem', title: 'Open', arguments: args };
       return { type: 'item', item: t };
     };
+    const withId = (node: Node, nodeId: string): Node => {
+      (node as { item: vscode.TreeItem }).item.id = nodeId;
+      return node;
+    };
     switch (id) {
-      case 'areas':
-        return map.areas.map((a) => item(a.name, ['area', a.id], 'folder', a.summary));
-      case 'flows':
-        return map.flows.map((f) => {
-          const node = item(f.name, ['flow', f.id], 'arrow-right', f.summary, 'flow');
-          (node as { item: vscode.TreeItem }).item.id = `flow:${f.id}`;
+      case 'architecture':
+        return (map.architecture?.parts ?? []).map((p) => {
+          const node = withId(item(p.name, ['part', p.id], p.external ? 'cloud' : 'package', p.summary), `part:${p.id}`);
+          (node as { item: vscode.TreeItem }).item.description = p.runs ?? (p.external ? 'outside this repo' : '');
           return node;
         });
+      case 'areas':
+        return map.areas.map((a) => withId(item(a.name, ['area', a.id], 'folder', a.summary, 'area'), `area:${a.id}`));
+      case 'flows':
+        return map.flows.map((f) => withId(item(f.name, ['flow', f.id], f.question ? 'comment-discussion' : 'arrow-right', f.question ?? f.summary, 'flow'), `flow:${f.id}`));
       case 'concepts': {
         const kinds = [...new Set(map.concepts.map((c) => c.kind))];
         const order = Object.keys(KIND_LABEL) as ConceptKind[];
@@ -153,6 +199,18 @@ export class MapTree implements vscode.TreeDataProvider<Node> {
     }
     return [];
   }
+}
+
+export function modelsTooltip(m: ModelsInUse): string {
+  if (!m.provider) return 'No AI found yet. codelearn uses GitHub Copilot Chat or Claude Code; neither needs an API key. Click to set one up.';
+  const auto = m.slots.every((s) => s.auto);
+  return [
+    `**${m.provider}**${auto ? ', models picked automatically' : ''}`,
+    '',
+    ...m.slots.map((s) => `- ${s.label}: ${s.model ?? 'none found'}, ${s.effort} effort`),
+    '',
+    'Click to change.',
+  ].join('\n');
 }
 
 function collapsed(label: string, icon?: string, state = vscode.TreeItemCollapsibleState.Collapsed): vscode.TreeItem {

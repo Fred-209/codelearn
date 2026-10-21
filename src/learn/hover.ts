@@ -5,6 +5,7 @@ import { commandLink } from '../ui/links';
 import { trustLevel } from './anchor';
 import { Explainer } from './explain';
 import { worthExplaining } from './hoverFilter';
+import { hoverPause } from './hoverPause';
 import { ConceptIndex, matchGlossary, matchTokens } from './matcher';
 
 const COMMANDS = [
@@ -34,7 +35,7 @@ export class TeachingHover implements vscode.HoverProvider {
 
   async provideHover(doc: vscode.TextDocument, pos: vscode.Position, token: vscode.CancellationToken): Promise<vscode.Hover | undefined> {
     const cfg = vscode.workspace.getConfiguration('codelearn');
-    if (!cfg.get<boolean>('hover.enabled', true)) return undefined;
+    if (!cfg.get<boolean>('hover.enabled', true) || hoverPause.count > 0) return undefined;
     if (doc.uri.scheme !== 'file' && doc.uri.scheme !== 'untitled' && doc.uri.scheme !== 'vscode-remote') return undefined;
 
     const map = await this.s.store.getMap();

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ClaudeCodeProvider } from './claudeCode';
 import type { ModelInfo, Slot } from './modelPick';
 import { AIProvider, AIRequest, AIResult, AIUnavailableError } from './provider';
+import { redactSecrets } from '../scan/redact';
 import { chooseProvider, NO_PROVIDER_HELP, PROVIDER_NAMES, ProviderId } from './providerChoice';
 import { VsCodeLmProvider } from './vscodeLm';
 import type { UsageEntry } from '../store/usageReport';
@@ -46,7 +47,8 @@ export class ProviderRouter implements AIProvider {
     const id = await this.current();
     const target = id === 'copilot' ? this.copilot : id === 'claude-code' ? this.claude : undefined;
     if (!id || !target) throw new AIUnavailableError(NO_PROVIDER_HELP);
-    const result = await target.complete(req, token);
+    // Code in prompts may hold passwords or keys someone committed: mask them before they leave.
+    const result = await target.complete({ ...req, user: redactSecrets(req.user) }, token);
     this.onUsage?.({
       at: new Date().toISOString(),
       provider: PROVIDER_NAMES[id],
@@ -57,6 +59,7 @@ export class ProviderRouter implements AIProvider {
       output: result.usage?.output,
       exact: result.usage?.exact ?? false,
       costUSD: result.usage?.costUSD,
+      ...(result.lookups ? { lookups: result.lookups } : {}),
     });
     return result;
   }

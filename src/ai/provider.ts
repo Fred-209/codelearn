@@ -1,5 +1,6 @@
 import type { CancellationToken } from 'vscode';
 import { extractJson, JsonExtractError, looksCutOff } from './json';
+import type { Lookups } from './lookups';
 import type { ModelInfo, Slot } from './modelPick';
 
 export interface AIRequest {
@@ -11,6 +12,8 @@ export interface AIRequest {
   justification: string;
   /** What the request is for, shown in the usage tally, e.g. "lesson: LINQ". */
   purpose: string;
+  /** Lets the model look things up in the repo (read-only, capped) before it answers. */
+  lookups?: Lookups;
 }
 
 export interface TokenUsage {
@@ -26,6 +29,8 @@ export interface AIResult {
   text: string;
   model: string;
   usage?: TokenUsage;
+  /** Lookups the model made. */
+  lookups?: number;
 }
 
 /**
@@ -78,7 +83,8 @@ export async function completeJson<T>(
       ? `Your previous reply was cut off after ${first.text.length} characters, before the JSON was complete. ` +
         `Reply again with the complete JSON object in well under ${Math.round(first.text.length * 0.6)} characters: fewer items and shorter text. No prose and no code fences.`
       : `Your previous reply could not be parsed: ${e.message}\nReply again with ONLY the JSON object, no prose and no code fences.`;
-    const retry = await provider.complete({ ...req, user: `${req.user}\n\n${ask}` }, token);
+    // No lookups the second time: the model already had its chance to look, and it costs requests.
+    const retry = await provider.complete({ ...req, lookups: undefined, user: `${req.user}\n\n${ask}` }, token);
     try {
       return { value: parse(retry), model: retry.model };
     } catch (e2) {

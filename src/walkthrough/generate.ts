@@ -22,6 +22,10 @@ export class WalkthroughBuilder {
 
   async forFlow(flow: Flow, token?: vscode.CancellationToken, force = false): Promise<Walkthrough> {
     const root = this.requireRoot();
+    if (flow.steps?.length && !force) {
+      const fromMap = await this.fromSteps(flow, root);
+      if (fromMap) return fromMap;
+    }
     const sources: Source[] = [];
     let total = 0;
     for (const file of flow.files.slice(0, 8)) {
@@ -34,6 +38,23 @@ export class WalkthroughBuilder {
     }
     if (sources.length === 0) throw new Error(`None of the files in "${flow.name}" could be read. Try "codelearn: Update map".`);
     return this.build(`flow-${flow.id}`, `walk through "${flow.name}". ${flow.summary}`, sources, 'deep', token, force);
+  }
+
+  /**
+   * A flow the map followed step by step walks with no AI request, as long as most of its steps
+   * still point at the code they quoted. Otherwise the code changed too much and the AI writes it.
+   */
+  private async fromSteps(flow: Flow, root: vscode.Uri): Promise<Walkthrough | undefined> {
+    const steps = flow.steps ?? [];
+    const sources: { file: string; lines: string[] }[] = [];
+    for (const file of new Set(steps.map((st) => st.file))) {
+      const text = await readText(root, file);
+      if (text) sources.push({ file, lines: text.split(/\r?\n/) });
+    }
+    const checked = verifySteps(steps.map((st) => ({ ...st, concepts: st.concepts ?? [] })), sources);
+    const found = checked.filter((st) => st.verified).length;
+    if (checked.length < 2 || found < Math.ceil(steps.length / 2)) return undefined;
+    return { id: `flow-${flow.id}`, title: flow.name, summary: flow.summary, steps: checked, generatedAt: new Date().toISOString(), model: 'the repo map' };
   }
 
   async forRange(uri: vscode.Uri, startLine: number, endLine: number, token?: vscode.CancellationToken): Promise<Walkthrough> {

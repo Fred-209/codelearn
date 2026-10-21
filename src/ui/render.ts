@@ -21,17 +21,24 @@ import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 import MarkdownIt from 'markdown-it';
 import { trustLevel } from '../learn/anchor';
+import type { Example, ExampleSearch } from '../learn/examples';
+import { covers, Place } from '../learn/places';
 import type { Zoom } from '../ai/prompts';
 import type {
+  ArchitectureLink,
+  ArchitecturePart,
   Citation,
   Concept,
   ConceptStatus,
   Depth,
+  DocLink,
   Explanation,
+  Flow,
   Lesson,
   RepoMap,
   Walkthrough,
 } from '../store/types';
+import { renderDiagram } from './diagram';
 import { searchUrl, videoSearchUrl } from './links';
 
 const LANGUAGES = { bash, cpp, csharp, css, go, java, javascript, json, kotlin, php, python, ruby, rust, sql, typescript, xml, yaml };
@@ -49,6 +56,46 @@ function highlight(code: string, lang: string): string {
 }
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false, highlight });
+
+const EXT_LANG: Record<string, string> = {
+  ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
+  js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+  cs: 'csharp', csx: 'csharp', py: 'python', java: 'java', kt: 'kotlin', kts: 'kotlin', go: 'go', rs: 'rust', rb: 'ruby', php: 'php',
+  c: 'cpp', h: 'cpp', cc: 'cpp', cpp: 'cpp', hpp: 'cpp', css: 'css', scss: 'css', less: 'css',
+  html: 'xml', htm: 'xml', xml: 'xml', cshtml: 'xml', razor: 'xml', vue: 'xml', svelte: 'xml', csproj: 'xml', config: 'xml',
+  json: 'json', yml: 'yaml', yaml: 'yaml', sh: 'bash', bash: 'bash', sql: 'sql',
+};
+
+/** The highlight.js language for a file, from its extension. */
+export function langOf(file: string): string | undefined {
+  const ext = file.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  return ext ? EXT_LANG[ext] : undefined;
+}
+
+/** Highlighted code, one entry per line. Spans open at a line end are closed and reopened, so each line stands alone. */
+export function highlightLines(code: string, lang?: string): string[] {
+  let html: string;
+  try {
+    html = lang && hljs.getLanguage(lang) ? hljs.highlight(code, { language: lang, ignoreIllegals: true }).value : esc(code);
+  } catch {
+    html = esc(code);
+  }
+  const lines: string[] = [];
+  const open: string[] = [];
+  let cur = '';
+  for (const tok of html.split(/(<span[^>]*>|<\/span>|\n)/)) {
+    if (tok === '\n') {
+      lines.push(cur + '</span>'.repeat(open.length));
+      cur = open.join('');
+    } else {
+      if (tok.startsWith('<span')) open.push(tok);
+      else if (tok === '</span>') open.pop();
+      cur += tok;
+    }
+  }
+  lines.push(cur + '</span>'.repeat(open.length));
+  return lines;
+}
 
 export function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -70,6 +117,10 @@ export type View =
       generating?: string;
       answers: { question: string; answer?: string }[];
       names: Record<string, string>;
+      /** Real uses in this repo, found by searching the code. */
+      examples?: ExampleSearch;
+      /** True while that search runs. */
+      searching?: boolean;
     }
   | {
       kind: 'explain';
@@ -81,10 +132,14 @@ export type View =
       explanation?: Explanation;
       generating?: string;
       names: Record<string, string>;
+      /** Where the file sits in the map: its part of the system, area and flows. */
+      places?: Place[];
     }
   | { kind: 'walkthrough'; walkthrough: Walkthrough; index: number; names: Record<string, string> }
-  | { kind: 'mapItem'; map: RepoMap; type: 'overview' | 'area' | 'flow' | 'term' | 'convention'; id: string }
+  | { kind: 'mapItem'; map: RepoMap; type: MapItemType; id: string }
   | { kind: 'usage'; report: string };
+
+export type MapItemType = 'overview' | 'architecture' | 'part' | 'area' | 'flow' | 'term' | 'convention';
 
 export function renderView(v: View): string {
   switch (v.kind) {
@@ -154,11 +209,10 @@ function renderLesson(v: Extract<View, { kind: 'lesson' }>): string {
       .join('')}</div></section>`);
   }
 
-  if (c.usage || c.citations.length) {
-    parts.push(`<section class="box tint-green"><h2>In this repo</h2>${c.usage ? `<p>${esc(c.usage)}</p>` : ''}${renderCitations(c.citations)}</section>`);
-  }
+  const codebase = renderCodebase(v);
+  if (codebase) parts.push(codebase);
 
-  parts.push(`<section class="accent-blue"><h2>Learn more</h2><p>
+  parts.push(`<section class="accent-blue"><h2>Learn more</h2>${renderDocs(v.generating ? undefined : v.lesson?.docs)}<p>
     <a href="${esc(searchUrl(c.docsSite, query))}">Search ${esc(c.docsSite || 'the docs')} for “${esc(query)}”</a><br>
     <a href="${esc(videoSearchUrl(query))}">Find videos on YouTube</a>
   </p></section>`);
@@ -179,6 +233,65 @@ function renderLesson(v: Extract<View, { kind: 'lesson' }>): string {
     </footer>`);
   }
   return parts.join('\n');
+}
+
+/**
+ * "In this codebase": how the map says the repo uses it, then real uses found by searching the
+ * code. Replaced on its own when the search finishes, so it has an id.
+ */
+export function renderCodebase(v: Extract<View, { kind: 'lesson' }>): string {
+  const c = v.concept;
+  const inner: string[] = [];
+  if (c.usage) inner.push(`<p>${esc(c.usage)}</p>`);
+  // Without citations, real examples found below back the usage up; only say "guess" when there are none.
+  const found = !!v.examples?.examples.length;
+  if (c.citations.length || (c.usage && !found && !v.searching)) inner.push(renderCitations(c.citations));
+  if (v.searching) inner.push('<p class="muted"><span class="spinner"></span>Looking for examples in this repo\'s code…</p>');
+  else if (v.examples) inner.push(renderExamples(v.examples));
+  if (inner.length === 0) return '';
+  return `<section id="codebase" class="box tint-green"><h2>In this codebase</h2>${inner.join('')}</section>`;
+}
+
+function renderExamples(found: ExampleSearch): string {
+  if (found.terms.length === 0) return '';
+  const terms = found.terms
+    .slice(0, 6)
+    .map((t) => `<code>${esc(t)}</code>`)
+    .join(', ');
+  if (found.examples.length === 0) return `<p class="muted">No uses found: searched ${found.searched} files for ${terms}.</p>`;
+  const others = found.matched - found.examples.length;
+  const more = found.more.length
+    ? `<details class="more"><summary>${others} more ${others === 1 ? 'file' : 'files'}${others > found.more.length ? `, first ${found.more.length} shown` : ''}</summary><ul class="cites">${found.more
+        .map((m) => `<li><button class="link" data-action="open" data-file="${esc(m.file)}" data-line="${m.line}">${esc(m.file)}:${m.line}</button> <code>${esc(m.text)}</code></li>`)
+        .join('')}</ul></details>`
+    : '';
+  return `<p class="muted">Searched ${found.searched} files for ${terms}: used in ${found.matched}.</p>${found.examples.map(renderSnippet).join('')}${more}`;
+}
+
+function renderSnippet(e: Example): string {
+  const lines = highlightLines(e.lines.join('\n'), langOf(e.file))
+    .map((html, i) => `<span class="cl${e.start + i === e.line ? ' hit' : ''}"><span class="ln">${e.start + i}</span>${html || ' '}</span>`)
+    .join('');
+  return `<figure class="example"><figcaption><button class="link" data-action="open" data-file="${esc(e.file)}" data-line="${e.line}">${esc(e.file)}:${e.line}</button></figcaption><pre class="hljs snippet"><code>${lines}</code></pre></figure>`;
+}
+
+/** Official documentation pages the lesson suggested; checked ones loaded when it was written. */
+function renderDocs(docs: DocLink[] | undefined): string {
+  const safe = (docs ?? []).filter((d) => d.url.startsWith('https://'));
+  if (safe.length === 0) return '';
+  const host = (url: string) => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return '';
+    }
+  };
+  return `<ul class="docs">${safe
+    .map(
+      (d) =>
+        `<li><a href="${esc(d.url)}">${esc(d.title)}</a> <span class="muted">${esc(host(d.url))}${d.checked ? ' · <span title="codelearn opened this page when it wrote the lesson">✓ checked</span>' : ''}</span></li>`,
+    )
+    .join('')}</ul>`;
 }
 
 function renderCheck(check: NonNullable<Lesson['check']>): string {
@@ -211,7 +324,9 @@ const ZOOMS: [Zoom, string][] = [
 
 function renderExplain(v: Extract<View, { kind: 'explain' }>): string {
   const parts: string[] = [];
-  parts.push(`<header><div class="eyebrow">What's happening here?</div><h1>${esc(v.explanation?.title ?? v.file)}</h1><p class="muted">${esc(v.file)} · ${esc(v.lines)}</p></header>`);
+  parts.push(
+    `<header><div class="eyebrow">What's happening here?</div><h1>${esc(v.explanation?.title ?? v.file)}</h1><p class="muted">${esc(v.file)} · ${esc(v.lines)}</p>${renderPlaces(v.places)}</header>`,
+  );
   parts.push(`<div class="toolbar"><div class="seg" role="group" aria-label="Zoom">${ZOOMS.map(
     ([z, label]) => `<button data-action="zoom" data-zoom="${z}" class="${z === v.zoom ? 'sel' : ''}" aria-pressed="${z === v.zoom}">${label}</button>`,
   ).join('')}</div>${
@@ -233,6 +348,19 @@ function renderExplain(v: Extract<View, { kind: 'explain' }>): string {
     parts.push(`<footer><button data-action="wrong">This is wrong</button><span class="muted">Written by ${esc(e.model)}</span></footer>`);
   }
   return parts.join('\n');
+}
+
+const PLACE_KIND: Record<Place['type'], string> = { part: 'part', area: 'area', flow: 'flow' };
+
+/** "Part of: [Runtime] [Users] [Signing in]", linking to the map. */
+function renderPlaces(places: Place[] | undefined): string {
+  if (!places?.length) return '';
+  return `<div class="places"><span class="muted">Part of</span>${places
+    .map(
+      (p) =>
+        `<button class="chip" data-action="map" data-type="${p.type}" data-id="${esc(p.id)}"><span class="chip-kind">${PLACE_KIND[p.type]}</span>${esc(p.name)}</button>`,
+    )
+    .join('')}</div>`;
 }
 
 export function renderWalkthrough(w: Walkthrough, index: number, names: Record<string, string>): string {
@@ -268,34 +396,172 @@ export function renderWalkthrough(w: Walkthrough, index: number, names: Record<s
 
 function renderMapItem(v: Extract<View, { kind: 'mapItem' }>): string {
   const m = v.map;
-  if (v.type === 'overview') {
-    return `<header><div class="eyebrow">Overview</div><h1>${esc(m.repoName)}</h1></header>
-      <section class="body"><p>${esc(m.overview)}</p></section>
-      <section class="box tint-blue"><h2>Areas</h2><ul>${m.areas.map((a) => `<li><button class="link" data-action="map" data-type="area" data-id="${esc(a.id)}">${esc(a.name)}</button>: ${esc(a.summary)}</li>`).join('')}</ul></section>
-      <section class="box tint-purple"><h2>Main flows</h2><ul>${m.flows.map((f) => `<li><button class="link" data-action="map" data-type="flow" data-id="${esc(f.id)}">${esc(f.name)}</button>: ${esc(f.summary)}</li>`).join('')}</ul></section>
-      <p class="muted">Map built ${esc(m.generatedAt.slice(0, 10))} by ${esc(m.model)}.</p>`;
-  }
-  if (v.type === 'area') {
-    const a = m.areas.find((x) => x.id === v.id);
-    if (!a) return notFound();
-    return `<header><div class="eyebrow">Area</div><h1>${esc(a.name)}</h1></header><section class="body"><p>${esc(a.summary)}</p></section>
-      <section class="box tint-blue"><h2>Where it lives</h2><ul>${a.paths.map((p) => `<li><code>${esc(p)}</code></li>`).join('')}</ul></section>`;
-  }
-  if (v.type === 'flow') {
-    const f = m.flows.find((x) => x.id === v.id);
-    if (!f) return notFound();
-    return `<header><div class="eyebrow">Flow</div><h1>${esc(f.name)}</h1></header><section class="body"><p>${esc(f.summary)}</p></section>
-      <div class="toolbar"><button class="primary" data-action="walk-flow" data-id="${esc(f.id)}">Walk me through this flow</button></div>
-      <section class="box tint-purple"><h2>Files, in order</h2><ol>${f.files.map((p) => `<li><button class="link" data-action="open" data-file="${esc(p)}" data-line="1">${esc(p)}</button></li>`).join('')}</ol></section>
-      ${f.entry ? `<section class="box tint-green"><h2>Starts at</h2>${renderCitations([f.entry])}</section>` : ''}`;
-  }
-  if (v.type === 'term') {
-    const t = m.glossary.find((x) => x.term === v.id);
-    if (!t) return notFound();
-    return `<header><div class="eyebrow">Business term</div><h1>${esc(t.term)}</h1></header><section class="body"><p>${esc(t.meaning)}</p></section>
+  switch (v.type) {
+    case 'overview':
+      return renderOverview(m);
+    case 'architecture':
+      return renderArchitecture(m);
+    case 'part':
+      return renderPart(m, v.id);
+    case 'area':
+      return renderArea(m, v.id);
+    case 'flow':
+      return renderFlow(m, v.id);
+    case 'term': {
+      const t = m.glossary.find((x) => x.term === v.id);
+      if (!t) return notFound();
+      return `<header><div class="eyebrow">Business term</div><h1>${esc(t.term)}</h1></header><section class="body"><p>${esc(t.meaning)}</p></section>
       <section class="box tint-green"><h2>In the code</h2>${renderCitations(t.citations)}</section>`;
+    }
+    case 'convention':
+      return renderConvention(m, v.id);
   }
-  const c = m.conventions[Number(v.id)];
+}
+
+function renderOverview(m: RepoMap): string {
+  const parts = m.architecture?.parts ?? [];
+  const main = m.flows.filter((f) => !f.question);
+  const asked = m.flows.filter((f) => f.question);
+  return `<header><div class="eyebrow">Overview</div><h1>${esc(m.repoName)}</h1></header>
+    <section class="body">${markdown(m.overview)}</section>
+    <div class="toolbar"><div class="actions">${
+      parts.length ? '<button class="primary" data-action="map" data-type="architecture" data-id="">How the parts fit together</button> ' : ''
+    }<button data-action="investigate" title="One AI request: codelearn follows your question through the code and adds the answer to the map">Investigate a question…</button></div></div>
+    ${
+      parts.length
+        ? `<section class="box tint-blue"><h2>Parts of the system</h2><ul>${parts
+            .map((p) => `<li><button class="link" data-action="map" data-type="part" data-id="${esc(p.id)}">${esc(p.name)}</button>${runsText(p)}: ${esc(p.summary)}</li>`)
+            .join('')}</ul></section>`
+        : ''
+    }
+    <section class="box tint-blue"><h2>Areas</h2><ul>${m.areas.map((a) => `<li><button class="link" data-action="map" data-type="area" data-id="${esc(a.id)}">${esc(a.name)}</button>: ${esc(a.summary)}</li>`).join('')}</ul></section>
+    <section class="box tint-purple"><h2>Main flows</h2><ul>${main.map(flowItem).join('')}</ul></section>
+    ${asked.length ? `<section class="box tint-purple"><h2>Your questions</h2><ul>${asked.map(flowItem).join('')}</ul></section>` : ''}
+    ${
+      m.depth === 'thorough'
+        ? ''
+        : `<div class="callout">This is a Quick map, written from one look at the code. A Thorough map also follows each main flow through the code step by step, then checks the overview and the architecture against what it found. It takes more AI requests; you'll see how many before anything is sent. <button data-action="build-map">Build a Thorough map</button></div>`
+    }
+    <p class="muted">${m.depth === 'thorough' ? 'Thorough map' : 'Map'} built ${esc(m.generatedAt.slice(0, 10))} by ${esc(m.model)}.</p>`;
+}
+
+function flowItem(f: Flow): string {
+  return `<li><button class="link" data-action="map" data-type="flow" data-id="${esc(f.id)}">${esc(f.name)}</button>: ${esc(f.summary)}</li>`;
+}
+
+/** " · Azure Static Web Apps", where the part runs. */
+function runsText(p: ArchitecturePart): string {
+  return p.runs ? ` <span class="muted">· ${esc(p.runs)}</span>` : p.external ? ' <span class="muted">· outside this repo</span>' : '';
+}
+
+function renderArchitecture(m: RepoMap): string {
+  const a = m.architecture;
+  const head = `<header><div class="eyebrow">Architecture</div><h1>How ${esc(m.repoName)} fits together</h1></header>`;
+  if (!a?.parts.length) {
+    return `${head}<div class="callout">This map was built before codelearn described architectures. Build the map again to get one: every new map has it, and a Thorough map checks it against each main flow.</div>
+      <div class="toolbar"><button class="primary" data-action="build-map">Build the map again</button></div>`;
+  }
+  return `${head}
+    ${a.summary ? `<section class="body">${markdown(a.summary)}</section>` : ''}
+    <figure class="diagram-wrap">${renderDiagram(a)}<figcaption class="legend muted"><span class="key"></span>shown in the code<span class="key dashed"></span>the AI's inference<span class="key ext"></span>outside this repo · select a box for details</figcaption></figure>
+    <section class="box tint-blue"><h2>Parts</h2>${a.parts
+      .map(
+        (p) =>
+          `<div class="part-card"><button class="link" data-action="map" data-type="part" data-id="${esc(p.id)}"><strong>${esc(p.name)}</strong></button>${runsText(p)}<p>${esc(p.summary)}</p></div>`,
+      )
+      .join('')}</section>
+    <section class="box tint-purple"><h2>How they connect</h2>${renderLinks(a.links, a.parts)}</section>`;
+}
+
+function renderLinks(links: ArchitectureLink[], parts: ArchitecturePart[]): string {
+  if (links.length === 0) return '<p class="muted">No connections were found.</p>';
+  const part = (id: string) => `<button class="link" data-action="map" data-type="part" data-id="${esc(id)}">${esc(parts.find((p) => p.id === id)?.name ?? id)}</button>`;
+  return `<ul class="links">${links
+    .map((l) => {
+      const e = l.evidence;
+      const proof = e?.verified
+        ? `<button class="link" data-action="open" data-file="${esc(e.file)}" data-line="${e.line}">✓ ${esc(e.file)}:${e.line}</button>`
+        : `<span class="tag inferred" title="No code was found that shows this connection: it is the AI's inference.">inferred</span>${
+            e ? ` <button class="link" data-action="open" data-file="${esc(e.file)}" data-line="${e.line}" title="Where the AI pointed; the code it quoted wasn't found there">? ${esc(e.file)}:${e.line}</button>` : ''
+          }`;
+      return `<li>${part(l.from)} → ${part(l.to)}: ${esc(l.how)} ${proof}</li>`;
+    })
+    .join('')}</ul>`;
+}
+
+function renderPart(m: RepoMap, id: string): string {
+  const a = m.architecture;
+  const p = a?.parts.find((x) => x.id === id);
+  if (!a || !p) return notFound();
+  const links = a.links.filter((l) => l.from === id || l.to === id);
+  const flows = m.flows.filter((f) => f.part === id);
+  // Areas inside this part's folders.
+  const areas = p.external ? [] : m.areas.filter((ar) => ar.paths.some((x) => p.paths.some((pp) => covers(pp, x.replace(/\/?[*?].*$/, '')))));
+  return `<header><div class="eyebrow">${p.external ? 'Outside service' : 'Part of the system'}</div><h1>${esc(p.name)}</h1>${
+    p.runs ? `<p class="muted">Runs: ${esc(p.runs)}</p>` : p.external ? '<p class="muted">Not in this repo: the code talks to it.</p>' : ''
+  }</header>
+    <section class="body"><p>${esc(p.summary)}</p></section>
+    <div class="toolbar"><button data-action="map" data-type="architecture" data-id="">See the whole architecture</button></div>
+    ${p.paths.length ? `<section class="box tint-blue"><h2>Where it lives</h2><ul>${p.paths.map((x) => `<li><code>${esc(x)}</code></li>`).join('')}</ul></section>` : ''}
+    ${p.entry ? `<section class="box tint-green"><h2>Starts at</h2>${renderCitations([p.entry])}</section>` : ''}
+    ${links.length ? `<section class="box tint-purple"><h2>Connections</h2>${renderLinks(links, a.parts)}</section>` : ''}
+    ${flows.length ? `<section class="box tint-purple"><h2>Flows that run here</h2><ul>${flows.map(flowItem).join('')}</ul></section>` : ''}
+    ${areas.length ? `<section class="box tint-blue"><h2>Areas in it</h2><ul>${areas.map((ar) => `<li><button class="link" data-action="map" data-type="area" data-id="${esc(ar.id)}">${esc(ar.name)}</button>: ${esc(ar.summary)}</li>`).join('')}</ul></section>` : ''}`;
+}
+
+function renderArea(m: RepoMap, id: string): string {
+  const a = m.areas.find((x) => x.id === id);
+  if (!a) return notFound();
+  const inArea = (file: string) => a.paths.some((p) => covers(p, file));
+  const flows = m.flows.filter((f) => f.files.some(inArea) || f.steps?.some((s) => inArea(s.file)));
+  return `<header><div class="eyebrow">Area</div><h1>${esc(a.name)}</h1></header><section class="body"><p>${esc(a.summary)}</p></section>
+    <div class="toolbar"><button class="${a.details ? '' : 'primary'}" data-action="explore" data-id="${esc(a.id)}" title="One AI request that reads this area's main files">${
+      a.details ? 'Explore again' : 'Explore deeper'
+    }</button></div>
+    ${a.details ? `<section class="body">${markdown(a.details)}</section>` : ''}
+    ${
+      a.keyFiles?.length
+        ? `<section class="box tint-green"><h2>Key files</h2><ul class="cites">${a.keyFiles
+            .map((k) => `<li><button class="link" data-action="open" data-file="${esc(k.file)}" data-line="1">${esc(k.file)}</button>: ${esc(k.role)}</li>`)
+            .join('')}</ul></section>`
+        : ''
+    }
+    <section class="box tint-blue"><h2>Where it lives</h2><ul>${a.paths.map((p) => `<li><code>${esc(p)}</code></li>`).join('')}</ul></section>
+    ${flows.length ? `<section class="box tint-purple"><h2>Flows through it</h2><ul>${flows.map(flowItem).join('')}</ul></section>` : ''}`;
+}
+
+function renderFlow(m: RepoMap, id: string): string {
+  const f = m.flows.find((x) => x.id === id);
+  if (!f) return notFound();
+  const names: Record<string, string> = Object.fromEntries(m.concepts.map((c) => [c.id, c.name]));
+  const part = f.part ? m.architecture?.parts.find((p) => p.id === f.part) : undefined;
+  const steps = f.steps?.length
+    ? `<section class="box tint-purple"><h2>Step by step</h2><ol class="flow-steps">${f.steps
+        .map(
+          (s) =>
+            `<li><div><strong>${esc(s.title)}</strong> <button class="link" data-action="open" data-file="${esc(s.file)}" data-line="${s.line}">${s.verified ? '✓' : '?'} ${esc(s.file)}:${s.line}</button></div>${markdown(s.body)}${
+              s.concepts?.length
+                ? `<div class="chips">${s.concepts.map((c) => `<button class="chip" data-action="lesson" data-ref="${esc(c)}">${esc(names[c] ?? c)}</button>`).join('')}</div>`
+                : ''
+            }</li>`,
+        )
+        .join('')}</ol>${f.steps.some((s) => !s.verified) ? '<p class="trust guess">Steps marked ? point at code that wasn\'t found where the AI said: treat them as its guess.</p>' : ''}</section>`
+    : '';
+  return `<header><div class="eyebrow">${f.question ? 'Your question' : 'Flow'}</div><h1>${esc(f.name)}</h1>${
+    f.question ? `<p class="muted">You asked: “${esc(f.question)}”</p>` : ''
+  }${part ? `<div class="places"><span class="muted">Runs in</span><button class="chip" data-action="map" data-type="part" data-id="${esc(part.id)}">${esc(part.name)}</button></div>` : ''}</header>
+    <section class="body"><p>${esc(f.summary)}</p></section>
+    <div class="toolbar"><button class="primary" data-action="walk-flow" data-id="${esc(f.id)}"${
+      f.steps?.length ? ' title="Follows the steps below in the editor: no AI request"' : ''
+    }>Walk me through this flow</button></div>
+    ${f.details ? `<section class="body">${markdown(f.details)}</section>` : ''}
+    ${steps}
+    ${f.files.length ? `<section class="box tint-blue"><h2>Files, in order</h2><ol>${f.files.map((p) => `<li><button class="link" data-action="open" data-file="${esc(p)}" data-line="1">${esc(p)}</button></li>`).join('')}</ol></section>` : ''}
+    ${f.entry ? `<section class="box tint-green"><h2>Starts at</h2>${renderCitations([f.entry])}</section>` : ''}`;
+}
+
+function renderConvention(m: RepoMap, id: string): string {
+  const c = m.conventions[Number(id)];
   if (!c) return notFound();
   const statusText = {
     confirmed: 'The code follows this.',
@@ -410,6 +676,43 @@ progress::-webkit-progress-bar { background: var(--vscode-editorWidget-backgroun
 progress::-webkit-progress-value { background: var(--vscode-progressBar-background, #0e70c0); border-radius: 2px; }
 .spinner { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -1px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.places { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.chip-kind { font-size: .78em; text-transform: uppercase; letter-spacing: .04em; color: var(--vscode-descriptionForeground); margin-right: 5px; }
+.example { margin: 10px 0 12px; }
+.example figcaption { font-size: .92em; margin-bottom: 3px; }
+pre.snippet { margin: 0; padding: 6px 0; }
+.snippet .cl { display: block; padding-right: 12px; }
+.snippet .cl.hit { background: color-mix(in srgb, var(--c-yellow) 16%, transparent); }
+.snippet .ln { display: inline-block; min-width: 3.5ch; padding: 0 12px 0 6px; text-align: right; color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground)); user-select: none; }
+.snippet .cl.hit .ln { color: var(--vscode-editorLineNumber-activeForeground, var(--vscode-foreground)); }
+details.more { margin-top: 6px; }
+details.more summary { cursor: pointer; color: var(--vscode-textLink-foreground); }
+ul.docs { margin: 4px 0 8px; padding-left: 20px; }
+.diagram-wrap { margin: 16px 0 6px; overflow-x: auto; }
+.diagram-wrap svg { display: block; max-width: 100%; min-width: 520px; height: auto; margin: 0 auto; }
+svg.diagram .part { cursor: pointer; }
+svg.diagram .part:focus { outline: none; }
+svg.diagram .part rect { fill: color-mix(in srgb, var(--c-blue) 12%, var(--vscode-editor-background)); stroke: color-mix(in srgb, var(--c-blue) 70%, transparent); stroke-width: 1.2; }
+svg.diagram .part:hover rect, svg.diagram .part:focus rect { stroke: var(--vscode-focusBorder); stroke-width: 2; }
+svg.diagram .part.external rect { fill: var(--vscode-editor-background); stroke: var(--vscode-descriptionForeground); stroke-dasharray: 4 3; }
+svg.diagram .name { fill: var(--vscode-foreground); font-size: 12.5px; font-weight: 600; }
+svg.diagram .runs { fill: var(--vscode-descriptionForeground); font-size: 11px; }
+svg.diagram .edge { fill: none; stroke: var(--vscode-foreground); stroke-opacity: .65; stroke-width: 1.4; }
+svg.diagram .edge.inferred { stroke-dasharray: 5 4; stroke-opacity: .5; }
+svg.diagram .arrowhead { fill: var(--vscode-foreground); fill-opacity: .7; }
+.legend { font-size: .88em; margin-top: 6px; }
+.key { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--vscode-foreground); opacity: .7; vertical-align: middle; margin: 0 6px 0 12px; }
+.key:first-child { margin-left: 0; }
+.key.dashed { border-top-style: dashed; }
+.key.ext { width: 16px; height: 10px; border: 1px dashed var(--vscode-descriptionForeground); }
+.part-card { margin: 10px 0; }
+.part-card p { margin: 2px 0 0; }
+.links li { margin: 5px 0; }
+.tag { font-size: .8em; padding: 0 6px; border-radius: 8px; border: 1px solid currentColor; }
+.tag.inferred { color: var(--vscode-editorWarning-foreground); }
+.flow-steps { padding-left: 22px; }
+.flow-steps > li { margin-bottom: 12px; }
+.flow-steps p { margin: 4px 0; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 `;
 
@@ -417,7 +720,17 @@ export const SCRIPT = `
 const vscode = acquireVsCodeApi();
 // Alt+Left and the mouse's back button go back, like a browser, when there is somewhere to go.
 const goBack = () => { if (document.querySelector('.backbar')) vscode.postMessage({ action: 'back' }); };
-document.addEventListener('keydown', (ev) => { if (ev.altKey && ev.key === 'ArrowLeft') { ev.preventDefault(); goBack(); } });
+document.addEventListener('keydown', (ev) => {
+  if (ev.altKey && ev.key === 'ArrowLeft') { ev.preventDefault(); goBack(); }
+  // Boxes in the architecture diagram act as buttons.
+  const t = ev.target;
+  if ((ev.key === 'Enter' || ev.key === ' ') && t instanceof SVGElement && t.dataset.action) { ev.preventDefault(); t.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+});
+// Parts of the page that finish later, such as a lesson's examples, arrive on their own.
+window.addEventListener('message', (ev) => {
+  const m = ev.data;
+  if (m && m.type === 'replace') { const el = document.getElementById(m.id); if (el) el.outerHTML = m.html; }
+});
 document.addEventListener('mouseup', (ev) => { if (ev.button === 3) { ev.preventDefault(); goBack(); } });
 document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-action]');
@@ -435,6 +748,8 @@ document.addEventListener('click', (ev) => {
   }
   vscode.postMessage({ action, ...el.dataset });
 });
+// Lets the extension know the page can take updates.
+vscode.postMessage({ action: 'loaded', page: document.body.dataset.page });
 `;
 
 /** "← LINQ": back to the page this tab showed before. */
@@ -447,5 +762,5 @@ export function page(body: string, nonce: string, cspSource: string): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style nonce="${nonce}">${STYLES}</style></head>
-<body>${body}<script nonce="${nonce}">${SCRIPT}</script></body></html>`;
+<body data-page="${nonce}">${body}<script nonce="${nonce}">${SCRIPT}</script></body></html>`;
 }
