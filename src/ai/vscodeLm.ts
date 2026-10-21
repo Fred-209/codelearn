@@ -14,8 +14,7 @@ export class VsCodeLmProvider implements AIProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    const models = await vscode.lm.selectChatModels();
-    return models.map(toInfo);
+    return (await usableModels()).map(toInfo);
   }
 
   async modelFor(slot: Slot): Promise<ModelInfo | undefined> {
@@ -24,7 +23,7 @@ export class VsCodeLmProvider implements AIProvider {
   }
 
   async complete(req: AIRequest, token?: vscode.CancellationToken): Promise<AIResult> {
-    const all = await vscode.lm.selectChatModels();
+    const all = await usableModels();
     const info = pickModel(all.map(toInfo), req.slot, settingFor(req.slot));
     const model = info && all.find((m) => m.id === info.id);
     if (!model) {
@@ -66,21 +65,28 @@ export class VsCodeLmProvider implements AIProvider {
     try {
       let reply = await sendWithEffort(effort);
       if (!reply.text.trim()) {
-        // Usually the reply hit the model's output limit while it was still thinking, which
-        // high effort on a large request makes likely. Ask once more with less thinking.
+        // Nothing at all, straight away: the model ignored the request (or its settings).
+        // Something after a while: usually the output limit was reached while it was still
+        // thinking, which high effort on a large request makes likely.
+        const instant = reply.ms < 3000 && !Object.keys(reply.parts).length;
         this.log?.warn(`${model.name} sent back no text: ${await this.describe(model, messages[0], reply, effort)}`);
-        if (effort !== 'low' && !this.noEffort.has(model.id)) {
+        if (instant) {
+          reply = await send(undefined);
+        } else if (effort !== 'low' && !this.noEffort.has(model.id)) {
           reply = await sendWithEffort('low');
-          if (!reply.text.trim()) this.log?.warn(`${model.name} sent back no text again: ${await this.describe(model, messages[0], reply, 'low')}`);
         }
         if (!reply.text.trim()) {
+          this.log?.warn(`${model.name} sent back no text again: ${await this.describe(model, messages[0], reply, instant ? undefined : 'low')}`);
           throw new AIEmptyReplyError(
-            `${model.name} sent back an empty reply. This usually means the reply hit the model's length limit, which large requests at high effort make likely. ` +
-              `Try another model or a lower effort for the ${req.slot} slot with "codelearn: Choose AI models". Details are in the codelearn log.`,
+            instant
+              ? `${model.name} (${model.vendor}) answered instantly with nothing, so it doesn't seem to take requests from extensions. ` +
+                  `Pick another model for the ${req.slot} slot with "codelearn: Choose AI models".`
+              : `${model.name} sent back an empty reply. This usually means the reply hit the model's length limit, which large requests at high effort make likely. ` +
+                  `Try another model or a lower effort for the ${req.slot} slot with "codelearn: Choose AI models". Details are in the codelearn log.`,
           );
         }
       }
-      this.log?.info(`${req.purpose}: ${model.name} replied with ${reply.text.length} characters in ${Math.round(reply.ms / 1000)}s.`);
+      this.log?.info(`${req.purpose}: ${model.name} (${model.vendor}/${model.id}) replied with ${reply.text.length} characters in ${Math.round(reply.ms / 1000)}s.`);
       return { text: reply.text, model: model.name, usage: await estimateUsage(model, messages[0], reply.text) };
     } catch (e) {
       throw friendlyError(e);
@@ -90,11 +96,11 @@ export class VsCodeLmProvider implements AIProvider {
   }
 
   /** What came back, for the log. Counts and sizes only: never the code or the reply. */
-  private async describe(model: vscode.LanguageModelChat, prompt: vscode.LanguageModelChatMessage, reply: Reply, effort: Effort): Promise<string> {
+  private async describe(model: vscode.LanguageModelChat, prompt: vscode.LanguageModelChatMessage, reply: Reply, effort: Effort | undefined): Promise<string> {
     const parts = Object.entries(reply.parts).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing';
     const tokens = await Promise.resolve(model.countTokens(prompt)).catch(() => undefined);
-    const effortNote = this.noEffort.has(model.id) ? 'not supported' : effort;
-    return `received ${parts} in ${Math.round(reply.ms / 1000)}s; prompt about ${tokens ?? '?'} of ${model.maxInputTokens} input tokens; effort ${effortNote}.`;
+    const effortNote = this.noEffort.has(model.id) ? 'not supported' : (effort ?? 'not sent');
+    return `model ${model.vendor}/${model.id}; received ${parts} in ${(reply.ms / 1000).toFixed(1)}s; prompt about ${tokens ?? '?'} of ${model.maxInputTokens} input tokens; effort ${effortNote}.`;
   }
 
   /** Models that rejected a reasoning effort this session. */
@@ -120,6 +126,20 @@ function partKind(part: unknown): string {
   if (part instanceof vscode.LanguageModelToolCallPart) return 'tool call';
   const name = (part as object | undefined)?.constructor?.name ?? typeof part;
   return name.replace(/^LanguageModel/, '').replace(/Part$/, '').toLowerCase() || 'other';
+}
+
+/**
+ * Models that answer requests from extensions. Copilot's own models come first. Some
+ * providers list models only for their agent sessions and answer extension requests with
+ * nothing: Copilot CLI ("copilotcli") lists Claude and GPT models that reply instantly and
+ * empty, and count every prompt as 0 tokens.
+ */
+const SESSION_ONLY_VENDORS = new Set(['copilotcli']);
+
+export async function usableModels(): Promise<vscode.LanguageModelChat[]> {
+  const copilot = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+  if (copilot.length) return copilot;
+  return (await vscode.lm.selectChatModels()).filter((m) => !SESSION_ONLY_VENDORS.has(m.vendor));
 }
 
 /** Copilot's models offer low, medium and high. */

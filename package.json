@@ -2,7 +2,7 @@
   "name": "codelearn",
   "displayName": "codelearn",
   "description": "Learn an unfamiliar codebase from inside VS Code: teaching hovers, lessons, walkthroughs and a map of the repo, written by GitHub Copilot or Claude Code.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "fred-209",
   "license": "UNLICENSED",
   "private": true,
