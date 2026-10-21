@@ -1,9 +1,15 @@
 name: Release
 
-# Push a tag like v0.1.0 to publish a .vsix on the GitHub Releases page.
+# Push a tag like v0.1.0 to publish a .vsix on the GitHub Releases page,
+# or run this workflow from the Actions tab with a version to tag the current main.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. v0.1.0'
+        required: true
 
 permissions:
   contents: write
@@ -23,4 +29,6 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" *.vsix --title "codelearn $GITHUB_REF_NAME" --generate-notes
+          TAG: ${{ inputs.version || github.ref_name }}
+        # Creates the tag at this commit when it doesn't exist yet (a run from the Actions tab).
+        run: gh release create "$TAG" *.vsix --target "$GITHUB_SHA" --title "codelearn $TAG" --generate-notes
