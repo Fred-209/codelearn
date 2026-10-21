@@ -1,0 +1,459 @@
+{
+  "name": "codelearn",
+  "displayName": "codelearn",
+  "description": "Learn an unfamiliar codebase from inside VS Code: teaching hovers, lessons, walkthroughs and a map of the repo, written by GitHub Copilot or Claude Code.",
+  "version": "0.1.0",
+  "publisher": "fred-209",
+  "license": "UNLICENSED",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fred-209/codelearn"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Education",
+    "Other"
+  ],
+  "keywords": [
+    "learning",
+    "onboarding",
+    "codebase",
+    "copilot",
+    "explain"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codelearn.buildMap",
+        "title": "Build map of this repo",
+        "category": "codelearn",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codelearn.updateMap",
+        "title": "Update map (changed files only)",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.whatsHappening",
+        "title": "What's happening here?",
+        "category": "codelearn",
+        "icon": "$(book)"
+      },
+      {
+        "command": "codelearn.explainSelection",
+        "title": "Explain this",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.stepThrough",
+        "title": "Step through this",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.searchConcept",
+        "title": "Find a concept…",
+        "category": "codelearn",
+        "icon": "$(search)"
+      },
+      {
+        "command": "codelearn.setupProfile",
+        "title": "Tell codelearn what you already know",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.chooseModels",
+        "title": "Choose AI models",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.clearRepoData",
+        "title": "Delete saved lessons for this repo",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.startFlowWalkthrough",
+        "title": "Walk me through this flow",
+        "category": "codelearn",
+        "icon": "$(play)"
+      },
+      {
+        "command": "codelearn.openLesson",
+        "title": "Open lesson",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.openMapItem",
+        "title": "Open",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.setConceptStatus",
+        "title": "Set concept status",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.reportWrong",
+        "title": "This is wrong",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.showUsage",
+        "title": "Show AI usage",
+        "category": "codelearn",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "codelearn.explainWord",
+        "title": "Explain this word",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.explainRange",
+        "title": "Explain this range",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.walkthrough.next",
+        "title": "Next step",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.walkthrough.back",
+        "title": "Previous step",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.walkthrough.end",
+        "title": "End walkthrough",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.walkthrough.openInPanel",
+        "title": "Open walkthrough in panel",
+        "category": "codelearn"
+      },
+      {
+        "command": "codelearn.walkthrough.backToInline",
+        "title": "Show walkthrough inline",
+        "category": "codelearn"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "codelearn.whatsHappening",
+        "key": "ctrl+alt+/",
+        "mac": "cmd+alt+/",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codelearn.walkthrough.next",
+        "key": "alt+right",
+        "when": "codelearn.walkthroughActive"
+      },
+      {
+        "command": "codelearn.walkthrough.back",
+        "key": "alt+left",
+        "when": "codelearn.walkthroughActive"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "codelearn.whatsHappening",
+          "group": "codelearn@1"
+        },
+        {
+          "command": "codelearn.explainSelection",
+          "group": "codelearn@2",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "codelearn.stepThrough",
+          "group": "codelearn@3"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "codelearn.searchConcept",
+          "when": "view == codelearn.map",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codelearn.buildMap",
+          "when": "view == codelearn.map",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codelearn.chooseModels",
+          "when": "view == codelearn.map",
+          "group": "2_usage@1"
+        },
+        {
+          "command": "codelearn.showUsage",
+          "when": "view == codelearn.map",
+          "group": "2_usage@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codelearn.startFlowWalkthrough",
+          "when": "view == codelearn.map && viewItem == flow",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "codelearn.openLesson",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.openMapItem",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.setConceptStatus",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.reportWrong",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.explainWord",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.explainRange",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.startFlowWalkthrough",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.walkthrough.next",
+          "when": "codelearn.walkthroughActive"
+        },
+        {
+          "command": "codelearn.walkthrough.back",
+          "when": "codelearn.walkthroughActive"
+        },
+        {
+          "command": "codelearn.walkthrough.end",
+          "when": "codelearn.walkthroughActive"
+        },
+        {
+          "command": "codelearn.walkthrough.openInPanel",
+          "when": "codelearn.walkthroughActive"
+        },
+        {
+          "command": "codelearn.walkthrough.backToInline",
+          "when": "codelearn.walkthroughActive"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codelearn",
+          "title": "codelearn",
+          "icon": "media/codelearn.svg"
+        }
+      ]
+    },
+    "views": {
+      "codelearn": [
+        {
+          "id": "codelearn.map",
+          "name": "Map"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "codelearn.map",
+        "contents": "No map for this repo yet. codelearn reads the code, finds its main areas, flows and concepts, and prepares lessons so hovers are instant.\n[Build map](command:codelearn.buildMap)\nYou'll see an estimate of AI requests before anything is sent.\n[Tell codelearn what you know](command:codelearn.setupProfile)"
+      }
+    ],
+    "configuration": {
+      "title": "codelearn",
+      "properties": {
+        "codelearn.provider": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "copilot",
+            "claude-code"
+          ],
+          "enumItemLabels": [
+            "Automatic",
+            "GitHub Copilot",
+            "Claude Code"
+          ],
+          "enumDescriptions": [
+            "GitHub Copilot when VS Code offers its models, otherwise Claude Code when it is installed.",
+            "Models from GitHub Copilot Chat, through VS Code's Language Model API.",
+            "Your Claude login, through the Claude Code command line (`claude -p`)."
+          ],
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "Which AI codelearn uses. Neither option needs an API key. Kept per machine (not synced), so a work machine can use Copilot while a personal one uses Claude Code."
+        },
+        "codelearn.claudeCode.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `claude` executable. Leave empty to look on your PATH, in the usual install folders, and inside the Claude Code VS Code extension."
+        },
+        "codelearn.models.deep": {
+          "type": "string",
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "Model for heavy reasoning across many files: building the map, flow walkthroughs and rewrites after \"This is wrong\". `auto` uses the recommended model: Opus-class, else GPT Sol. Use **codelearn: Choose AI models** to pick from a list."
+        },
+        "codelearn.models.standard": {
+          "type": "string",
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "Model for lessons, concept descriptions and \"What's happening here?\" explanations. `auto` uses the recommended model: Sonnet-class, else GPT Sol."
+        },
+        "codelearn.models.fast": {
+          "type": "string",
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "Model for quick explanations of words the map doesn't cover. `auto` uses the recommended model: Haiku-class, else GPT Luna."
+        },
+        "codelearn.effort.deep": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "How hard the Deep model thinks. `auto` is the recommendation, `high`. Copilot models accept `low`, `medium` and `high` (higher values are sent as `high`); on VS Code versions that can't pass effort to Copilot, the effort chosen in the chat model picker is used instead."
+        },
+        "codelearn.effort.standard": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "How hard the Standard model thinks. `auto` is the recommendation, `medium`."
+        },
+        "codelearn.effort.fast": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "How hard the Fast model thinks. `auto` is the recommendation, `low`."
+        },
+        "codelearn.hover.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show teaching hovers for concepts in the repo map."
+        },
+        "codelearn.hover.showForUnknown": {
+          "type": "boolean",
+          "default": true,
+          "description": "On symbols the map doesn't know, show a one-line \"Explain this\" link in the hover."
+        },
+        "codelearn.hover.autoGenerate": {
+          "type": "boolean",
+          "default": false,
+          "description": "Generate an explanation automatically when you hover over something the map doesn't know. Uses an AI request per new symbol; results are saved."
+        },
+        "codelearn.walkthrough.defaultView": {
+          "type": "string",
+          "enum": [
+            "inline",
+            "panel"
+          ],
+          "default": "inline",
+          "description": "Where walkthrough steps appear the first time. After that, codelearn remembers the view you last used."
+        },
+        "codelearn.scan.maxFiles": {
+          "type": "number",
+          "default": 1500,
+          "description": "Maximum number of files read when building the map."
+        },
+        "codelearn.scan.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/.git/**",
+            "**/bin/**",
+            "**/obj/**",
+            "**/dist/**",
+            "**/out/**",
+            "**/build/**",
+            "**/target/**",
+            "**/vendor/**",
+            "**/.venv/**",
+            "**/__pycache__/**",
+            "**/*.min.js",
+            "**/*.map",
+            "**/package-lock.json",
+            "**/yarn.lock",
+            "**/pnpm-lock.yaml"
+          ],
+          "description": "Glob patterns skipped when building the map."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "npm run build -- --production && vsce package --no-dependencies --skip-license",
+    "vscode:prepublish": "npm run build -- --production",
+    "test:e2e": "npm run build && tsc -p tsconfig.e2e.json && node out/test/e2e/runTest.js"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.95.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.12",
+    "glob": "^10.5.0",
+    "mocha": "^10.8.2",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "highlight.js": "11.11.1",
+    "markdown-it": "^14.1.0"
+  }
+}
