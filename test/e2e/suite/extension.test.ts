@@ -1,8 +1,11 @@
-// Runs inside a real VS Code (see ../runTest.ts). No AI model is available here,
+// Runs inside a real VS Code (see ../runTest.ts). No real AI model is available here,
 // so these tests seed the saved map, lessons and walkthroughs and check what the
 // learner sees.
 
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import type { CodelearnTestApi } from '../../../src/extension';
 import type { Lesson, RepoMap, Walkthrough } from '../../../src/store/types';
@@ -179,5 +182,45 @@ describe('codelearn in VS Code', () => {
   it('opens map items such as flows in the panel', async () => {
     await vscode.commands.executeCommand('codelearn.openMapItem', 'flow', 'get-active');
     await until(() => tabLabels().includes('codelearn map'), 'map tab');
+  });
+
+  it('sends requests to the Claude Code command line when chosen', async function () {
+    if (process.platform === 'win32') this.skip();
+    // A stand-in for `claude`: reports how much it read on stdin and which model it was asked for.
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codelearn-claude-'));
+    const fake = path.join(dir, 'claude');
+    await fs.promises.writeFile(
+      fake,
+      [
+        '#!/bin/sh',
+        'input=$(cat)',
+        'model=""',
+        'while [ $# -gt 0 ]; do [ "$1" = "--model" ] && model="$2"; shift; done',
+        'if [ "$model" = "opus" ]; then echo \'{"type":"result","subtype":"success","is_error":true,"result":"Invalid API key · Please run /login"}\'; exit 1; fi',
+        'printf \'{"type":"result","subtype":"success","is_error":false,"result":"got %s chars for %s","modelUsage":{"fake-%s":{"outputTokens":1}}}\\n\' "${#input}" "$model" "$model"',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const cfg = vscode.workspace.getConfiguration('codelearn');
+    await cfg.update('provider', 'claude-code', vscode.ConfigurationTarget.Global);
+    await cfg.update('claudeCode.path', fake, vscode.ConfigurationTarget.Global);
+    try {
+      assert.strictEqual(await api.services.ai.name(), 'Claude Code');
+      assert.strictEqual((await api.services.ai.modelFor('deep'))?.id, 'opus');
+
+      const reply = await api.services.ai.complete({ slot: 'fast', system: 'S', user: 'U', justification: '' });
+      assert.strictEqual(reply.text, `got ${'S\n\n---\n\nU'.length} chars for haiku`);
+      assert.strictEqual(reply.model, 'fake-haiku');
+
+      await assert.rejects(
+        () => api.services.ai.complete({ slot: 'deep', system: 'S', user: 'U', justification: '' }),
+        // The bundled extension has its own copy of AIUnavailableError, so check the message.
+        (e: Error) => /not signed in/.test(e.message),
+      );
+    } finally {
+      await cfg.update('provider', undefined, vscode.ConfigurationTarget.Global);
+      await cfg.update('claudeCode.path', undefined, vscode.ConfigurationTarget.Global);
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
   });
 });

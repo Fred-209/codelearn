@@ -1,7 +1,7 @@
 {
   "name": "codelearn",
   "displayName": "codelearn",
-  "description": "Learn an unfamiliar codebase from inside VS Code: teaching hovers, lessons, walkthroughs and a map of the repo, written by your Copilot models.",
+  "description": "Learn an unfamiliar codebase from inside VS Code: teaching hovers, lessons, walkthroughs and a map of the repo, written by GitHub Copilot or Claude Code.",
   "version": "0.1.0",
   "publisher": "fred-209",
   "license": "UNLICENSED",
@@ -261,10 +261,29 @@
     "configuration": {
       "title": "codelearn",
       "properties": {
+        "codelearn.provider": {
+          "type": "string",
+          "enum": ["auto", "copilot", "claude-code"],
+          "enumItemLabels": ["Automatic", "GitHub Copilot", "Claude Code"],
+          "enumDescriptions": [
+            "GitHub Copilot when VS Code offers its models, otherwise Claude Code when it is installed.",
+            "Models from GitHub Copilot Chat, through VS Code's Language Model API.",
+            "Your Claude login, through the Claude Code command line (`claude -p`)."
+          ],
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "Which AI codelearn uses. Neither option needs an API key. Kept per machine (not synced), so a work machine can use Copilot while a personal one uses Claude Code."
+        },
+        "codelearn.claudeCode.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `claude` executable. Leave empty to look on your PATH, in the usual install folders, and inside the Claude Code VS Code extension."
+        },
         "codelearn.models.deep": {
           "type": "string",
           "default": "auto",
-          "markdownDescription": "Model for heavy reasoning across many files: building the map and walkthroughs. `auto` picks the strongest model Copilot offers. Use **codelearn: Choose AI models** to pick from a list."
+          "markdownDescription": "Model for heavy reasoning across many files: building the map and walkthroughs. `auto` picks the strongest model your AI offers (Opus-class). Use **codelearn: Choose AI models** to pick from a list."
         },
         "codelearn.models.standard": {
           "type": "string",

@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
-import { completeJson } from '../ai/provider';
+import { AIUnavailableError, completeJson } from '../ai/provider';
+import { NO_PROVIDER_HELP } from '../ai/providerChoice';
 import { conceptDetails, ConceptDetail, mapSkeleton, MapSkeleton } from '../ai/normalize';
 import { conceptDetailsPrompt, mapPrompt } from '../ai/prompts';
 import { verifyAll, verifyCitation, FileLookup } from '../learn/anchor';
 import { readText } from '../learn/files';
 import { matchTokens } from '../learn/matcher';
-import type { Services } from '../services';
+import { reportError, Services } from '../services';
 import type { Concept, RepoMap } from '../store/types';
 import { MAP_VERSION } from '../store/types';
 import { addOutlines, collectFiles } from './collect';
@@ -31,11 +32,13 @@ export class Scanner {
       vscode.window.showInformationMessage('codelearn is already building the map.');
       return;
     }
-    const [deep, standard] = await Promise.all([this.s.ai.modelFor('deep'), this.s.ai.modelFor('standard')]);
+    const [deep, standard, providerName] = await Promise.all([
+      this.s.ai.modelFor('deep'),
+      this.s.ai.modelFor('standard'),
+      this.s.ai.name(),
+    ]);
     if (!deep || !standard) {
-      vscode.window.showErrorMessage(
-        'codelearn: no AI model is available. It uses GitHub Copilot\'s models: install Copilot Chat and sign in, then try again.',
-      );
+      reportError(this.s, 'Cannot build the map', new AIUnavailableError(NO_PROVIDER_HELP));
       return;
     }
 
@@ -71,14 +74,14 @@ export class Scanner {
               modal: true,
               detail:
                 `codelearn read ${files.length} files. It will send a summary of the repo (about ${Math.round(digest.text.length / 1000)}k characters) ` +
-                `to ${deep.name}, then describe each concept it finds with ${standard.name}: about ${requests} AI requests through your AI provider (GitHub Copilot).\n\n` +
+                `to ${deep.name}, then describe each concept it finds with ${standard.name}: about ${requests} AI requests through ${providerName}.\n\n` +
                 'Lessons are written later, only when you open one. Results are saved on this computer only.',
             },
             'Build map',
           );
           if (ok !== 'Build map' || token.isCancellationRequested) return;
 
-          progress.report({ message: `Mapping the repo with ${deep.name}… (this can take a minute)` });
+          progress.report({ message: `Mapping the repo with ${deep.name}… (this can take a few minutes)` });
           const { value: skeleton, model } = await completeJson(
             this.s.ai,
             { slot: 'deep', ...mapPrompt(digest.text, this.s.store.getProfile()), justification: JUSTIFICATION },

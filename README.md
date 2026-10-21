@@ -1,6 +1,6 @@
 # codelearn
 
-A VS Code extension that teaches you an unfamiliar codebase from inside the editor. Point at code and learn what it is, how this repo uses it, and what you need to know first. It works in any language, and the AI is the GitHub Copilot you already have.
+A VS Code extension that teaches you an unfamiliar codebase from inside the editor. Point at code and learn what it is, how this repo uses it, and what you need to know first. It works in any language, and the AI is one you already have: GitHub Copilot, or your Claude login through Claude Code. Neither needs an API key.
 
 ## What it does
 
@@ -16,20 +16,25 @@ A VS Code extension that teaches you an unfamiliar codebase from inside the edit
 
 1. Download `codelearn-<version>.vsix` from the [Releases page](https://github.com/Fred-209/codelearn/releases). Each CI run also uploads the `.vsix` as an artifact.
 2. In VS Code, run **Extensions: Install from VSIX…** and pick the file.
-3. Make sure GitHub Copilot Chat is installed and signed in.
+3. Have one AI ready: GitHub Copilot Chat signed in, or [Claude Code](https://claude.com/claude-code) installed and logged in once (run `claude` in a terminal).
 4. Open a repo, open the **codelearn** sidebar (book icon), and click **Build map**. Before anything is sent, you'll see how many files were read and roughly how many AI requests the scan will make.
 
 ## AI models and usage
 
-codelearn uses the models VS Code exposes to extensions, which normally means GitHub Copilot's models. It needs no API key, and code goes only where Copilot already sends it. VS Code asks once for permission to use the models.
+codelearn can use either of two AIs. Neither needs an API key. Pick one with **codelearn: Choose AI models**, or leave it on **Automatic**, which uses Copilot when VS Code offers its models and Claude Code otherwise.
+
+- **GitHub Copilot**: the models VS Code exposes to extensions. Code goes only where Copilot already sends it. VS Code asks once for permission to use the models.
+- **Claude Code**: codelearn runs the `claude` command line in headless mode (`claude -p`) with your existing Claude login. Requests run with no tools, no MCP servers and no saved session, from a folder in codelearn's storage, so the repo's own `CLAUDE.md` and settings aren't loaded. codelearn finds `claude` on your PATH, in the usual install folders, or inside the Claude Code VS Code extension; set `codelearn.claudeCode.path` if it's somewhere else.
+
+The provider setting is kept per machine and isn't synced, so a work machine can stay on Copilot while a personal one uses Claude Code.
 
 Jobs are split across three model slots, each set to **Automatic** by default. You can change them with **codelearn: Choose AI models**.
 
 | Slot | Used for | Automatic choice |
 | --- | --- | --- |
-| Deep | building the map, flow walkthroughs, rewrites after "This is wrong" | strongest available (Opus-class) |
-| Standard | concept descriptions, lessons, explanations | mid-tier (Sonnet-class) |
-| Fast | quick explanations of words the map doesn't know | smallest (Haiku-class) |
+| Deep | building the map, flow walkthroughs, rewrites after "This is wrong" | strongest available (Opus-class; `opus` on Claude Code) |
+| Standard | concept descriptions, lessons, explanations | mid-tier (Sonnet-class; `sonnet`) |
+| Fast | quick explanations of words the map doesn't know | smallest (Haiku-class; `haiku`) |
 
 Most usage happens once per repo, during the first scan: one big request plus about one request per eight concepts. After that:
 
@@ -41,14 +46,16 @@ Most usage happens once per repo, during the first scan: one big request plus ab
 ## Privacy
 
 - Everything codelearn generates is saved in VS Code's private storage on your machine. Nothing is written into the repo.
-- The extension sends no telemetry and makes no network calls of its own. All AI requests go through VS Code's Language Model API.
+- The extension sends no telemetry and makes no network calls of its own. AI requests go through VS Code's Language Model API (Copilot) or the `claude` command line (Claude Code).
 - **codelearn: Delete saved lessons for this repo** removes everything saved for the current repo.
 
 ## Settings
 
 | Setting | Default | |
 | --- | --- | --- |
-| `codelearn.models.deep` / `.standard` / `.fast` | `auto` | Model per slot (id, family or a name fragment). |
+| `codelearn.provider` | `auto` | `copilot`, `claude-code`, or `auto`. Per machine. |
+| `codelearn.claudeCode.path` | empty | Path to `claude`, if codelearn can't find it. |
+| `codelearn.models.deep` / `.standard` / `.fast` | `auto` | Model per slot (id, family or a name fragment; for Claude Code, `opus`/`sonnet`/`haiku` or a full model name). |
 | `codelearn.hover.enabled` | `true` | Teaching hovers on mapped concepts. |
 | `codelearn.hover.showForUnknown` | `true` | One-line "explain" link on symbols the map doesn't know. |
 | `codelearn.hover.autoGenerate` | `false` | Explain unknown symbols automatically on hover (one request per new symbol, saved). |
@@ -74,7 +81,7 @@ To publish a release, push a tag such as `v0.1.0`. The Release workflow attaches
 
 | Path | What's there |
 | --- | --- |
-| `src/ai/` | Provider interface, VS Code Language Model provider, model slots, prompts, JSON parsing and validation |
+| `src/ai/` | Provider interface, Copilot (VS Code Language Model) and Claude Code providers, model slots, prompts, JSON parsing and validation |
 | `src/scan/` | Choosing files, building the repo digest, the map scan and incremental updates |
 | `src/learn/` | Hovers, lessons, explanations, citation checking, concept matching |
 | `src/walkthrough/` | Walkthrough generation, inline cards (Comments API), shared step state |
@@ -88,4 +95,4 @@ To publish a release, push a tag such as `v0.1.0`. The Release workflow attaches
 - **Active recall**: predict-before-reveal in walkthroughs, short refreshers on concepts you studied, and explain-it-back with feedback.
 - **Personal notes** on lines and concepts, exportable to Markdown.
 - **Practice tasks** in the real repo, with a review of your attempt.
-- Other AI providers (an API key, or a local model) behind the same provider interface.
+- More AI providers (an API key, or a local model) behind the same provider interface.

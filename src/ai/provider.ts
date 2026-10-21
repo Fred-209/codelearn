@@ -17,10 +17,13 @@ export interface AIResult {
 }
 
 /**
- * Anything that can answer a prompt. The default is GitHub Copilot via VS Code's
- * Language Model API; other providers (an API key, a local model) can implement this.
+ * Anything that can answer a prompt: GitHub Copilot via VS Code's Language Model API,
+ * or the Claude Code command line. Other providers (an API key, a local model) can
+ * implement this too.
  */
 export interface AIProvider {
+  /** Shown to the learner, e.g. in the scan estimate. */
+  name(): Promise<string>;
   listModels(): Promise<ModelInfo[]>;
   /** The model that would serve this slot right now, if any. */
   modelFor(slot: Slot): Promise<ModelInfo | undefined>;

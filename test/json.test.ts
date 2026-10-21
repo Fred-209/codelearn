@@ -35,6 +35,7 @@ describe('completeJson', () => {
     const replies = ['not json at all', '{"ok": true}'];
     const prompts: string[] = [];
     const provider: AIProvider = {
+      name: async () => 'fake',
       listModels: async () => [],
       modelFor: async () => undefined,
       complete: async (r) => {

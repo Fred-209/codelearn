@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SLOT_LABELS, SLOTS, pickModel } from './ai/modelPick';
-import { VsCodeLmProvider } from './ai/vscodeLm';
+import { NO_PROVIDER_HELP, PROVIDER_NAMES } from './ai/providerChoice';
+import { ProviderRouter } from './ai/router';
 import { Explainer, ExplainTarget } from './learn/explain';
 import { relPath } from './learn/files';
 import { TeachingHover } from './learn/hover';
@@ -25,7 +26,8 @@ export interface CodelearnTestApi {
 export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   const log = vscode.window.createOutputChannel('codelearn', { log: true });
   const store = new Store(context, vscode.workspace.workspaceFolders?.[0]);
-  const services: Services = { context, store, ai: new VsCodeLmProvider(), log };
+  const ai = new ProviderRouter(context);
+  const services: Services = { context, store, ai, log };
 
   const lessons = new Lessons(services);
   const explainer = new Explainer(services);
@@ -101,7 +103,7 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
     cmd('codelearn.buildMap', () => scanner.build('full')),
     cmd('codelearn.updateMap', () => scanner.build('update')),
     cmd('codelearn.setupProfile', () => runInterview(store)),
-    cmd('codelearn.chooseModels', () => chooseModels(services)),
+    cmd('codelearn.chooseModels', () => chooseModels(ai)),
 
     cmd('codelearn.whatsHappening', async () => {
       const t = await editorTarget();
@@ -181,13 +183,37 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
 
 export function deactivate(): void {}
 
-async function chooseModels(s: Services): Promise<void> {
-  const models = await s.ai.listModels();
+async function chooseModels(ai: ProviderRouter): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('codelearn');
+  const setting = cfg.get<string>('provider', 'auto');
+  const [now, hasCopilot, hasClaude] = await Promise.all([
+    ai.current(),
+    ai.copilot.listModels().then((m) => m.length > 0, () => false),
+    ai.claude.available(),
+  ]);
+  const found = (yes: boolean) => (yes ? 'available' : 'not found');
+  const provider = await vscode.window.showQuickPick(
+    [
+      { label: 'Automatic', description: now ? `currently ${PROVIDER_NAMES[now]}` : 'nothing found yet', value: 'auto', picked: setting === 'auto' },
+      { label: PROVIDER_NAMES.copilot, description: found(hasCopilot), detail: 'Models from GitHub Copilot Chat. No API key.', value: 'copilot', picked: setting === 'copilot' },
+      {
+        label: PROVIDER_NAMES['claude-code'],
+        description: found(hasClaude),
+        detail: 'Your Claude login, through the Claude Code command line. No API key.',
+        value: 'claude-code',
+        picked: setting === 'claude-code',
+      },
+    ],
+    { title: 'codelearn: which AI should it use?', placeHolder: `Now: ${setting === 'auto' ? 'Automatic' : PROVIDER_NAMES[setting as 'copilot']}` },
+  );
+  if (!provider) return;
+  await cfg.update('provider', provider.value, vscode.ConfigurationTarget.Global);
+
+  const models = await ai.listModels();
   if (models.length === 0) {
-    vscode.window.showErrorMessage('codelearn: no AI models are available. Install GitHub Copilot Chat and sign in.');
+    vscode.window.showErrorMessage(`codelearn: ${NO_PROVIDER_HELP}`);
     return;
   }
-  const cfg = vscode.workspace.getConfiguration('codelearn');
   for (const slot of SLOTS) {
     const current = cfg.get<string>(`models.${slot}`, 'auto');
     const auto = pickModel(models, slot, 'auto');

@@ -7,6 +7,10 @@ import { ModelInfo, pickModel, Slot } from './modelPick';
  * Claude models Copilot offers). No API key: requests go wherever Copilot sends them.
  */
 export class VsCodeLmProvider implements AIProvider {
+  async name(): Promise<string> {
+    return 'GitHub Copilot';
+  }
+
   async listModels(): Promise<ModelInfo[]> {
     const models = await vscode.lm.selectChatModels();
     return models.map(toInfo);
