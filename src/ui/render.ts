@@ -316,6 +316,8 @@ export const STYLES = `
   --c-purple: var(--vscode-charts-purple, #b180d7);
 }
 body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 4px 20px 32px; line-height: 1.55; max-width: 820px; }
+.backbar { margin: 2px 0 8px; }
+.backbar .back { font-size: .92em; color: var(--c-blue); }
 header { padding-bottom: 10px; border-bottom: 2px solid color-mix(in srgb, var(--c-blue) 45%, transparent); }
 h1 { font-size: 1.6em; margin: 4px 0 6px; line-height: 1.25; }
 h2 { font-size: .8em; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--accent, var(--vscode-descriptionForeground)); margin: 22px 0 8px; }
@@ -407,6 +409,10 @@ progress::-webkit-progress-value { background: var(--vscode-progressBar-backgrou
 
 export const SCRIPT = `
 const vscode = acquireVsCodeApi();
+// Alt+Left and the mouse's back button go back, like a browser, when there is somewhere to go.
+const goBack = () => { if (document.querySelector('.backbar')) vscode.postMessage({ action: 'back' }); };
+document.addEventListener('keydown', (ev) => { if (ev.altKey && ev.key === 'ArrowLeft') { ev.preventDefault(); goBack(); } });
+document.addEventListener('mouseup', (ev) => { if (ev.button === 3) { ev.preventDefault(); goBack(); } });
 document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-action]');
   if (!el) return;
@@ -424,6 +430,11 @@ document.addEventListener('click', (ev) => {
   vscode.postMessage({ action, ...el.dataset });
 });
 `;
+
+/** "← LINQ": back to the page this tab showed before. */
+export function renderBackBar(previousTitle: string): string {
+  return `<nav class="backbar"><button class="link back" data-action="back" title="Back (Alt+Left)">← ${esc(previousTitle)}</button></nav>`;
+}
 
 export function page(body: string, nonce: string, cspSource: string): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">

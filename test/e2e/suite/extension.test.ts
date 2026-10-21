@@ -216,6 +216,16 @@ describe('codelearn in VS Code', () => {
     await until(() => tabLabels().includes('codelearn map'), 'map tab');
   });
 
+  it('goes back to the previous page in the tab', async () => {
+    await api.panel.openLesson('linq');
+    await until(() => tabLabels().includes('Lesson: LINQ'), 'lesson tab');
+    await api.panel.openMapItem('flow', 'get-active');
+    await until(() => tabLabels().includes('codelearn map'), 'map tab');
+    assert.ok(api.panel.canGoBack);
+    await api.panel.back();
+    await until(() => tabLabels().includes('Lesson: LINQ'), 'back to the lesson');
+  });
+
   it('sends requests to the Claude Code command line when chosen', async function () {
     if (process.platform === 'win32') this.skip();
     // A stand-in for `claude`: reports how much it read on stdin and which model it was asked for.

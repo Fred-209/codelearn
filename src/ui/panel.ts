@@ -8,7 +8,30 @@ import { Lessons } from '../learn/lessons';
 import { reportError, Services } from '../services';
 import type { Depth } from '../store/types';
 import type { PanelHost, WalkState } from '../walkthrough/controller';
-import { page, renderView, View } from './render';
+import { page, renderBackBar, renderView, View } from './render';
+import type { RepoMap } from '../store/types';
+
+/** A page in the tab's history, and how to show it again. */
+interface Page {
+  key: string;
+  title: string;
+  open: () => unknown;
+}
+
+function mapItemTitle(map: RepoMap, type: string, id: string): string {
+  switch (type) {
+    case 'overview':
+      return `${map.repoName} overview`;
+    case 'area':
+      return map.areas.find((a) => a.id === id)?.name ?? 'Area';
+    case 'flow':
+      return map.flows.find((f) => f.id === id)?.name ?? 'Flow';
+    case 'term':
+      return id;
+    default:
+      return map.conventions[Number(id)]?.rule ?? 'Convention';
+  }
+}
 
 export interface PanelActions {
   walk(op: 'next' | 'back' | 'end' | 'inline' | 'panelClosed' | 'goto', index?: number): void;
@@ -27,6 +50,10 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   private beforeWalk: View | undefined;
   private explainTarget: ExplainTarget | undefined;
   private work: vscode.CancellationTokenSource | undefined;
+  /** Pages visited in this tab, for Back. */
+  private history: Page[] = [];
+  private current: Page | undefined;
+  private goingBack = false;
 
   constructor(
     private readonly s: Services,
@@ -41,6 +68,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     const concept = await this.lessons.resolve(ref);
     const status = this.s.store.getStatus(concept.name);
     const d: Depth = depth ?? (status === 'known' ? 'refresher' : this.s.store.getProfile()?.experience === 'new' ? 'scratch' : 'standard');
+    this.visit({ key: `lesson:${concept.id}`, title: concept.name, open: () => this.openLesson(concept.id, d) });
     const names = await this.names();
     const base = { kind: 'lesson' as const, concept, depth: d, status, answers: [], names };
 
@@ -58,6 +86,12 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   // ---- what's happening here ----
 
   async openExplain(target: ExplainTarget, zoom: Zoom, force = false): Promise<void> {
+    const where = `${relPath(target.uri)}:${target.startLine + 1}`;
+    this.visit({
+      key: `explain:${target.uri.toString()}:${target.startLine}-${target.endLine}:${target.focus ?? ''}`,
+      title: `What's happening in ${where}`,
+      open: () => this.openExplain(target, zoom),
+    });
     this.explainTarget = target;
     const names = await this.names();
     const span = target.startLine === target.endLine ? `line ${target.startLine + 1}` : `lines ${target.startLine + 1}-${target.endLine + 1}`;
@@ -75,6 +109,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   }
 
   async showQuick(word: string, uri: vscode.Uri, line: number): Promise<void> {
+    this.visit({ key: `quick:${word}:${uri.toString()}`, title: word, open: () => this.showQuick(word, uri, line) });
     const target: ExplainTarget = { uri, startLine: Math.max(0, line - 1), endLine: line - 1 };
     this.explainTarget = target;
     const base = { kind: 'explain' as const, file: relPath(uri), lines: `line ${line}`, zoom: 'line' as const, names: await this.names() };
@@ -98,6 +133,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
       });
       return;
     }
+    this.visit({ key: `map:${type}:${id}`, title: mapItemTitle(map, type, id), open: () => this.openMapItem(type, id) });
     this.show({ kind: 'mapItem', map, type, id });
   }
 
@@ -121,7 +157,38 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   }
 
   showUsage(report: string): void {
+    this.visit({ key: 'usage', title: 'AI usage', open: () => vscode.commands.executeCommand('codelearn.showUsage') });
     this.show({ kind: 'usage', report });
+  }
+
+  // ---- history ----
+
+  /** Records a page the tab is about to show, so Back can return to the one before it. */
+  private visit(page: Page): void {
+    if (this.goingBack) {
+      this.goingBack = false;
+    } else if (this.current && this.current.key !== page.key) {
+      this.history.push(this.current);
+      if (this.history.length > 30) this.history.shift();
+    }
+    // Same page with a different depth or zoom replaces the entry instead of stacking.
+    this.current = page;
+  }
+
+  /** Back to the previous page. Saved lessons reopen instantly, with no AI request. */
+  async back(): Promise<void> {
+    const previous = this.history.pop();
+    if (!previous) return;
+    this.goingBack = true;
+    try {
+      await previous.open();
+    } finally {
+      this.goingBack = false;
+    }
+  }
+
+  get canGoBack(): boolean {
+    return this.history.length > 0;
   }
 
   showLoading(title: string, message: string): void {
@@ -139,7 +206,8 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     const panel = this.ensurePanel();
     panel.title = titleFor(view);
     const nonce = randomBytes(16).toString('base64');
-    panel.webview.html = page(renderView(view), nonce, panel.webview.cspSource);
+    const previous = view.kind === 'walkthrough' ? undefined : this.history.at(-1);
+    panel.webview.html = page(`${previous ? renderBackBar(previous.title) : ''}${renderView(view)}`, nonce, panel.webview.cspSource);
   }
 
   private ensurePanel(): vscode.WebviewPanel {
@@ -159,6 +227,8 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
       const wasWalk = this.view?.kind === 'walkthrough';
       this.panel = undefined;
       this.view = undefined;
+      this.history = [];
+      this.current = undefined;
       this.work?.cancel();
       if (wasWalk) this.actions.walk('panelClosed');
     });
@@ -188,6 +258,8 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   private async onMessage(m: Record<string, string>): Promise<void> {
     const v = this.view;
     switch (m.action) {
+      case 'back':
+        return this.back();
       case 'lesson':
         return this.openLesson(m.ref);
       case 'depth':

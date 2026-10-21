@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { esc, markdown, page, renderCitations, renderView } from '../src/ui/render';
+import { esc, markdown, page, renderBackBar, renderCitations, renderView } from '../src/ui/render';
 import type { Concept, Lesson } from '../src/store/types';
 
 const concept: Concept = {
@@ -104,5 +104,13 @@ describe('code highlighting', () => {
 
   it('guesses the language when the block has none', () => {
     expect(markdown('```\nfunction add(a, b) { return a + b; }\n```')).toContain('hljs-');
+  });
+});
+
+describe('renderBackBar', () => {
+  it('links back to the previous page, escaping its title', () => {
+    const html = renderBackBar('<LINQ>');
+    expect(html).toContain('data-action="back"');
+    expect(html).toContain('&lt;LINQ&gt;');
   });
 });
