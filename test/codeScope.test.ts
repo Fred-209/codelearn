@@ -78,6 +78,13 @@ describe('scopeLadder and defaultScope', () => {
     expect(enclosingLabel(ladder, i)).toBe('class PaymentService, lines 3-21');
   });
 
+  it('skips blocks that are nearly a named scope, like a body without its signature', () => {
+    const ladder = scopeLadder(15, csharp, syntax, [method, cls]);
+    expect(ladder.find((s) => s.start === 8 && s.end === 19)).toBeUndefined();
+    const i = ladder.findIndex((s) => s.label === 'method CountActive');
+    expect(ladder[i - 1]).toMatchObject({ start: 11, end: 17 });
+  });
+
   it('labels unnamed blocks with their first line', () => {
     const ladder = scopeLadder(15, csharp, syntax, [method, cls]);
     expect(ladder.find((s) => s.start === 13)?.label).toBe('if (p.IsActive)');

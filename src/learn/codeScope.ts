@@ -65,10 +65,17 @@ export function scopeLadder(cursor: number, lines: string[], spans: LineSpan[], 
   for (const s of sorted) {
     if (!ladder.length || contains(s, ladder[ladder.length - 1])) ladder.push(s);
   }
-  for (const s of ladder) {
+  // Drop blocks that are nearly a named scope (a method's body without its signature, a class's
+  // braces), so Smaller and Larger always visibly change something.
+  const kept = ladder.filter((s, i) => {
+    if (i === 0 || s.kind !== 'block') return true;
+    const named = ladder.slice(i + 1).find((o) => o.kind !== 'block');
+    return !named || size(named) - size(s) > 3;
+  });
+  for (const s of kept) {
     if (s.kind === 'block' && size(s) > 1) s.label = firstLine(lines, s);
   }
-  return ladder;
+  return kept;
 }
 
 /**
