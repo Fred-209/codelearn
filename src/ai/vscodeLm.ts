@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { AIProvider, AIRequest, AIResult, AIUnavailableError } from './provider';
+import { AIEmptyReplyError, AIProvider, AIRequest, AIResult, AIUnavailableError } from './provider';
 import { Effort, effortFor, ModelInfo, pickModel, Slot } from './modelPick';
 
 /**
@@ -7,6 +7,8 @@ import { Effort, effortFor, ModelInfo, pickModel, Slot } from './modelPick';
  * Claude models Copilot offers). No API key: requests go wherever Copilot sends them.
  */
 export class VsCodeLmProvider implements AIProvider {
+  constructor(private readonly log?: vscode.LogOutputChannel) {}
+
   async name(): Promise<string> {
     return 'GitHub Copilot';
   }
@@ -36,34 +38,63 @@ export class VsCodeLmProvider implements AIProvider {
     const cts = token ? undefined : new vscode.CancellationTokenSource();
     const cancel = token ?? cts!.token;
     const effort = copilotEffort(effortFor(req.slot, effortSetting(req.slot)));
-    const send = async (withEffort: boolean) => {
+    const send = async (level: Effort | undefined): Promise<Reply> => {
       const options: CopilotRequestOptions = { justification: req.justification };
-      if (withEffort) options.configuration = { reasoningEffort: effort };
+      if (level) options.configuration = { reasoningEffort: level };
+      const started = Date.now();
       const response = await model.sendRequest(messages, options, cancel);
-      let text = '';
-      for await (const chunk of response.text) text += chunk;
-      return text;
+      const reply: Reply = { text: '', parts: {}, ms: 0 };
+      for await (const part of response.stream) {
+        if (part instanceof vscode.LanguageModelTextPart) reply.text += part.value;
+        const kind = partKind(part);
+        reply.parts[kind] = (reply.parts[kind] ?? 0) + 1;
+      }
+      reply.ms = Date.now() - started;
+      return reply;
+    };
+    const sendWithEffort = async (level: Effort): Promise<Reply> => {
+      if (this.noEffort.has(model.id)) return send(undefined);
+      try {
+        return await send(level);
+      } catch (e) {
+        // A model without effort levels may reject the setting: ask again without it, once.
+        if (cancel.isCancellationRequested || isAccessError(e)) throw e;
+        this.noEffort.add(model.id);
+        return send(undefined);
+      }
     };
     try {
-      let text: string;
-      if (this.noEffort.has(model.id)) {
-        text = await send(false);
-      } else {
-        try {
-          text = await send(true);
-        } catch (e) {
-          // A model without effort levels may reject the setting: ask again without it, once.
-          if (cancel.isCancellationRequested || isAccessError(e)) throw e;
-          this.noEffort.add(model.id);
-          text = await send(false);
+      let reply = await sendWithEffort(effort);
+      if (!reply.text.trim()) {
+        // Usually the reply hit the model's output limit while it was still thinking, which
+        // high effort on a large request makes likely. Ask once more with less thinking.
+        this.log?.warn(`${model.name} sent back no text: ${await this.describe(model, messages[0], reply, effort)}`);
+        if (effort !== 'low' && !this.noEffort.has(model.id)) {
+          reply = await sendWithEffort('low');
+          if (!reply.text.trim()) this.log?.warn(`${model.name} sent back no text again: ${await this.describe(model, messages[0], reply, 'low')}`);
+        }
+        if (!reply.text.trim()) {
+          throw new AIEmptyReplyError(
+            `${model.name} sent back an empty reply. This usually means the reply hit the model's length limit, which large requests at high effort make likely. ` +
+              `Try another model or a lower effort for the ${req.slot} slot with "codelearn: Choose AI models". Details are in the codelearn log.`,
+          );
         }
       }
-      return { text, model: model.name, usage: await estimateUsage(model, messages[0], text) };
+      this.log?.info(`${req.purpose}: ${model.name} replied with ${reply.text.length} characters in ${Math.round(reply.ms / 1000)}s.`);
+      return { text: reply.text, model: model.name, usage: await estimateUsage(model, messages[0], reply.text) };
     } catch (e) {
       throw friendlyError(e);
     } finally {
       cts?.dispose();
     }
+  }
+
+  /** What came back, for the log. Counts and sizes only: never the code or the reply. */
+  private async describe(model: vscode.LanguageModelChat, prompt: vscode.LanguageModelChatMessage, reply: Reply, effort: Effort): Promise<string> {
+    const parts = Object.entries(reply.parts).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing';
+    const tokens = await Promise.resolve(model.countTokens(prompt)).catch(() => undefined);
+    const effortNote = this.noEffort.has(model.id) ? 'not supported' : effort;
+    return `received ${parts} in ${Math.round(reply.ms / 1000)}s; prompt about ${tokens ?? '?'} of ${model.maxInputTokens} input tokens; effort ${effortNote}.`;
   }
 
   /** Models that rejected a reasoning effort this session. */
@@ -76,6 +107,20 @@ export class VsCodeLmProvider implements AIProvider {
  * typings yet; versions that don't know it ignore it, and the model then uses the picker's effort.
  */
 type CopilotRequestOptions = vscode.LanguageModelChatRequestOptions & { configuration?: { reasoningEffort: string } };
+
+interface Reply {
+  text: string;
+  /** How many parts of each kind the stream sent, e.g. text, thinking. */
+  parts: Record<string, number>;
+  ms: number;
+}
+
+function partKind(part: unknown): string {
+  if (part instanceof vscode.LanguageModelTextPart) return 'text';
+  if (part instanceof vscode.LanguageModelToolCallPart) return 'tool call';
+  const name = (part as object | undefined)?.constructor?.name ?? typeof part;
+  return name.replace(/^LanguageModel/, '').replace(/Part$/, '').toLowerCase() || 'other';
+}
 
 /** Copilot's models offer low, medium and high. */
 export function copilotEffort(effort: Effort): 'low' | 'medium' | 'high' {

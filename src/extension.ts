@@ -33,7 +33,7 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   const log = vscode.window.createOutputChannel('codelearn', { log: true });
   const store = new Store(context, vscode.workspace.workspaceFolders?.[0]);
   const usage = new UsageLog(context.globalStorageUri);
-  const ai = new ProviderRouter(context, (entry) => void usage.record({ ...entry, repo: store.repoName }));
+  const ai = new ProviderRouter(context, (entry) => void usage.record({ ...entry, repo: store.repoName }), log);
   const services: Services = { context, store, ai, log };
 
   const lessons = new Lessons(services);
