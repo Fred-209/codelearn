@@ -27,15 +27,17 @@ codelearn can use either of two AIs. Neither needs an API key. Pick one with **c
 - **GitHub Copilot**: the models VS Code exposes to extensions. Code goes only where Copilot already sends it. VS Code asks once for permission to use the models.
 - **Claude Code**: codelearn runs the `claude` command line in headless mode (`claude -p`) with your existing Claude login. Requests run with no tools, no MCP servers and no saved session, from a folder in codelearn's storage, so the repo's own `CLAUDE.md` and settings aren't loaded. codelearn finds `claude` on your PATH, in the usual install folders, or inside the Claude Code VS Code extension; set `codelearn.claudeCode.path` if it's somewhere else.
 
-The provider setting is kept per machine and isn't synced, so a work machine can stay on Copilot while a personal one uses Claude Code.
+The provider, model and effort settings are kept per machine and aren't synced, so a work machine can stay on Copilot while a personal one uses Claude Code.
 
-Jobs are split across three model slots, each set to **Automatic** by default. You can change them with **codelearn: Choose AI models**.
+Jobs are split across three model slots. Each uses a recommended model by default, picked from the models your AI actually offers, so a newer version is used once it appears. **codelearn: Choose AI models** (also in the sidebar's ... menu) lets you keep the recommendations or pick any available model per slot.
 
-| Slot | Used for | Automatic choice |
-| --- | --- | --- |
-| Deep | building the map, flow walkthroughs, rewrites after "This is wrong" | strongest available (Opus-class; `opus` on Claude Code) |
-| Standard | concept descriptions, lessons, explanations | mid-tier (Sonnet-class; `sonnet`) |
-| Fast | quick explanations of words the map doesn't know | smallest (Haiku-class; `haiku`) |
+| Slot | Used for | Recommended model | Recommended effort |
+| --- | --- | --- | --- |
+| Deep | building the map, flow walkthroughs, rewrites after "This is wrong" | Opus-class, else GPT Sol (`opus` on Claude Code) | high |
+| Standard | concept descriptions, lessons, explanations | Sonnet-class, else GPT Sol (`sonnet`) | medium |
+| Fast | quick explanations of words the map doesn't know | Haiku-class, else GPT Luna (`haiku`) | low |
+
+Effort is applied on Claude Code (`--effort`). Copilot's Language Model API doesn't let extensions set effort, so Copilot uses its default for the model.
 
 **codelearn: Show AI usage** (also in the sidebar's ... menu) lists every request codelearn has made, by model and kind, with token counts. Claude Code reports exact tokens; for Copilot they are estimated with the model's tokenizer.
 
@@ -58,7 +60,8 @@ Most usage happens once per repo, during the first scan: one big request plus ab
 | --- | --- | --- |
 | `codelearn.provider` | `auto` | `copilot`, `claude-code`, or `auto`. Per machine. |
 | `codelearn.claudeCode.path` | empty | Path to `claude`, if codelearn can't find it. |
-| `codelearn.models.deep` / `.standard` / `.fast` | `auto` | Model per slot (id, family or a name fragment; for Claude Code, `opus`/`sonnet`/`haiku` or a full model name). |
+| `codelearn.models.deep` / `.standard` / `.fast` | `auto` | Model per slot (id, family or a name fragment; for Claude Code, `opus`/`sonnet`/`haiku` or a full model name). Per machine. |
+| `codelearn.effort.deep` / `.standard` / `.fast` | `auto` | Effort per slot (`low` to `max`). Claude Code only. Per machine. |
 | `codelearn.hover.enabled` | `true` | Teaching hovers on mapped concepts. |
 | `codelearn.hover.showForUnknown` | `true` | One-line "explain" link on code the map doesn't know (not on plain words, comments or strings). |
 | `codelearn.hover.autoGenerate` | `false` | Explain unknown symbols automatically on hover (one request per new symbol, saved). |

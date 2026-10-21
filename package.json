@@ -308,17 +308,41 @@
         "codelearn.models.deep": {
           "type": "string",
           "default": "auto",
-          "markdownDescription": "Model for heavy reasoning across many files: building the map and walkthroughs. `auto` picks the strongest model your AI offers (Opus-class). Use **codelearn: Choose AI models** to pick from a list."
+          "scope": "machine",
+          "markdownDescription": "Model for heavy reasoning across many files: building the map, flow walkthroughs and rewrites after \"This is wrong\". `auto` uses the recommended model: Opus-class, else GPT Sol. Use **codelearn: Choose AI models** to pick from a list."
         },
         "codelearn.models.standard": {
           "type": "string",
           "default": "auto",
-          "markdownDescription": "Model for lessons and \"What's happening here?\" explanations. `auto` picks a mid-tier model."
+          "scope": "machine",
+          "markdownDescription": "Model for lessons, concept descriptions and \"What's happening here?\" explanations. `auto` uses the recommended model: Sonnet-class, else GPT Sol."
         },
         "codelearn.models.fast": {
           "type": "string",
           "default": "auto",
-          "markdownDescription": "Model for quick on-demand explanations of things the map doesn't cover yet. `auto` picks the smallest fast model."
+          "scope": "machine",
+          "markdownDescription": "Model for quick explanations of words the map doesn't cover. `auto` uses the recommended model: Haiku-class, else GPT Luna."
+        },
+        "codelearn.effort.deep": {
+          "type": "string",
+          "enum": ["auto", "low", "medium", "high", "xhigh", "max"],
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "How hard the Deep model thinks. `auto` is the recommendation, `high`. Claude Code only: Copilot's API doesn't let extensions set effort, so Copilot uses its own default for the model."
+        },
+        "codelearn.effort.standard": {
+          "type": "string",
+          "enum": ["auto", "low", "medium", "high", "xhigh", "max"],
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "How hard the Standard model thinks. `auto` is the recommendation, `medium`. Claude Code only."
+        },
+        "codelearn.effort.fast": {
+          "type": "string",
+          "enum": ["auto", "low", "medium", "high", "xhigh", "max"],
+          "default": "auto",
+          "scope": "machine",
+          "markdownDescription": "How hard the Fast model thinks. `auto` is the recommendation, `low`. Claude Code only."
         },
         "codelearn.hover.enabled": {
           "type": "boolean",

@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { CLAUDE_MODELS, claudeArgs, claudeCandidates, ClaudeCliError, claudeInput, claudeModelFor, parseClaudeOutput } from './claudeCli';
-import type { ModelInfo, Slot } from './modelPick';
+import { effortFor, ModelInfo, Slot } from './modelPick';
 import { AIProvider, AIRequest, AIResult, AIUnavailableError } from './provider';
 
 /** How to start the CLI: a native binary, or the JS entry point run by VS Code's own Node. */
@@ -55,7 +55,7 @@ export class ClaudeCodeProvider implements AIProvider {
     // Run outside the repo so the CLI doesn't pick up the project's own CLAUDE.md or settings.
     await fs.promises.mkdir(this.workDir.fsPath, { recursive: true });
 
-    const { stdout, stderr, code } = await run(launch, claudeArgs(model.id), claudeInput(req.system, req.user), this.workDir.fsPath, token);
+    const { stdout, stderr, code } = await run(launch, claudeArgs(model.id, effortFor(req.slot, effortSetting(req.slot))), claudeInput(req.system, req.user), this.workDir.fsPath, token);
     try {
       const reply = parseClaudeOutput(stdout, stderr, code);
       return reply;
@@ -78,6 +78,10 @@ export class ClaudeCodeProvider implements AIProvider {
     const bundled = ext && (await findBundled(ext.extensionPath));
     return bundled ? (this.launch = launchFor(bundled)) : undefined;
   }
+}
+
+function effortSetting(slot: Slot): string {
+  return vscode.workspace.getConfiguration('codelearn').get<string>(`effort.${slot}`, 'auto');
 }
 
 function settingFor(slot: Slot): string {

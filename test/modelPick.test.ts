@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ModelInfo, pickModel, versionOf } from '../src/ai/modelPick';
+import { effortFor, ModelInfo, pickModel, versionOf } from '../src/ai/modelPick';
 
 const m = (name: string, family = name.toLowerCase().replace(/\s+/g, '-'), maxInputTokens = 128_000): ModelInfo => ({
   id: family,
@@ -34,9 +34,25 @@ describe('pickModel', () => {
   });
 
   it('treats GPT Luna as a fast model and GPT Sol as a deep one', () => {
-    const gpt = [m('GPT Sol 6'), m('GPT Luna 6'), m('GPT Luna 5')];
-    expect(pickModel(gpt, 'fast')?.name).toBe('GPT Luna 6');
-    expect(pickModel(gpt, 'deep')?.name).toBe('GPT Sol 6');
+    const gpt = [m('GPT-5.6 Luna'), m('GPT-6 Luna'), m('GPT-6 Sol'), m('GPT-6.1 Sol')];
+    expect(pickModel(gpt, 'fast')?.name).toBe('GPT-6 Luna');
+    expect(pickModel(gpt, 'deep')?.name).toBe('GPT-6.1 Sol');
+    expect(pickModel(gpt, 'standard')?.name).toBe('GPT-6.1 Sol');
+  });
+
+  it('recommends Opus, Sonnet and Haiku when Copilot offers both families', () => {
+    const both = [...copilot, m('GPT-6.1 Sol'), m('GPT-6 Luna')];
+    expect(pickModel(both, 'deep')?.name).toBe('Claude Opus 5.5');
+    expect(pickModel(both, 'standard')?.name).toBe('Claude Sonnet 5.5');
+    expect(pickModel(both, 'fast')?.name).toBe('Claude Haiku 5.5');
+  });
+
+  it('recommends high effort for deep work, medium for standard and low for fast', () => {
+    expect(effortFor('deep')).toBe('high');
+    expect(effortFor('standard')).toBe('medium');
+    expect(effortFor('fast')).toBe('low');
+    expect(effortFor('fast', 'max')).toBe('max');
+    expect(effortFor('deep', 'nonsense')).toBe('high');
   });
 
   it('falls back to the largest context window for deep when nothing matches', () => {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SLOT_LABELS, SLOTS, pickModel } from './ai/modelPick';
+import { EFFORTS, pickModel, RECOMMENDED_EFFORT, SLOT_LABELS, SLOTS } from './ai/modelPick';
 import { NO_PROVIDER_HELP, PROVIDER_NAMES } from './ai/providerChoice';
 import { ProviderRouter } from './ai/router';
 import { Explainer, ExplainTarget } from './learn/explain';
@@ -216,7 +216,7 @@ async function chooseModels(ai: ProviderRouter): Promise<void> {
   const found = (yes: boolean) => (yes ? 'available' : 'not found');
   const provider = await vscode.window.showQuickPick(
     [
-      { label: 'Automatic', description: now ? `currently ${PROVIDER_NAMES[now]}` : 'nothing found yet', value: 'auto', picked: setting === 'auto' },
+      { label: 'Automatic', description: now ? `currently ${PROVIDER_NAMES[now]}` : 'nothing found yet', detail: 'Copilot when VS Code offers its models, otherwise Claude Code.', value: 'auto', picked: setting === 'auto' },
       { label: PROVIDER_NAMES.copilot, description: found(hasCopilot), detail: 'Models from GitHub Copilot Chat. No API key.', value: 'copilot', picked: setting === 'copilot' },
       {
         label: PROVIDER_NAMES['claude-code'],
@@ -236,18 +236,55 @@ async function chooseModels(ai: ProviderRouter): Promise<void> {
     vscode.window.showErrorMessage(`codelearn: ${NO_PROVIDER_HELP}`);
     return;
   }
+  // Effort can only be set through Claude Code; Copilot's API doesn't offer it to extensions.
+  const withEffort = (await ai.current()) === 'claude-code';
+  const recommended = SLOTS.map((slot) => {
+    const model = pickModel(models, slot, 'auto');
+    return `${slot[0].toUpperCase()}${slot.slice(1)}: ${model?.name ?? 'none'}${withEffort ? ` (${RECOMMENDED_EFFORT[slot]})` : ''}`;
+  });
+  const how = await vscode.window.showQuickPick(
+    [
+      { label: '$(star) Use the recommended models', detail: recommended.join(' · '), value: 'recommended' },
+      { label: 'Choose a model for each job myself', detail: `Pick from the ${models.length} models available`, value: 'custom' },
+    ],
+    { title: 'codelearn: which models?' },
+  );
+  if (!how) return;
+  if (how.value === 'recommended') {
+    for (const slot of SLOTS) {
+      await cfg.update(`models.${slot}`, 'auto', vscode.ConfigurationTarget.Global);
+      await cfg.update(`effort.${slot}`, 'auto', vscode.ConfigurationTarget.Global);
+    }
+    vscode.window.showInformationMessage(`codelearn: using the recommended models. ${recommended.join(', ')}.`);
+    return;
+  }
+
   for (const slot of SLOTS) {
     const current = cfg.get<string>(`models.${slot}`, 'auto');
-    const auto = pickModel(models, slot, 'auto');
+    const best = pickModel(models, slot, 'auto');
+    const others = models.filter((m) => m !== best);
     const pick = await vscode.window.showQuickPick(
       [
-        { label: 'Automatic', description: auto ? `currently ${auto.name}` : '', value: 'auto', picked: current === 'auto' },
-        ...models.map((m) => ({ label: m.name, description: `${m.vendor} · ${m.family}`, value: m.id, picked: current === m.id })),
+        { label: `$(star) Recommended: ${best?.name ?? 'none'}`, description: 'kept up to date as new models appear', value: 'auto', picked: current === 'auto' },
+        ...others.map((m) => ({ label: m.name, description: `${m.vendor} · ${m.family}`, value: m.id, picked: current === m.id })),
       ],
-      { title: `codelearn model: ${SLOT_LABELS[slot]}`, placeHolder: `Now: ${current === 'auto' ? 'Automatic' : current}` },
+      { title: `codelearn model: ${SLOT_LABELS[slot]}`, placeHolder: `Now: ${current === 'auto' ? 'Recommended' : current}` },
     );
     if (!pick) return;
     await cfg.update(`models.${slot}`, pick.value, vscode.ConfigurationTarget.Global);
+
+    if (withEffort) {
+      const currentEffort = cfg.get<string>(`effort.${slot}`, 'auto');
+      const effort = await vscode.window.showQuickPick(
+        [
+          { label: `$(star) Recommended: ${RECOMMENDED_EFFORT[slot]}`, value: 'auto' },
+          ...EFFORTS.filter((e) => e !== RECOMMENDED_EFFORT[slot]).map((e) => ({ label: e, value: e })),
+        ],
+        { title: `codelearn effort: ${SLOT_LABELS[slot]}`, placeHolder: `How hard the model thinks. Now: ${currentEffort === 'auto' ? 'Recommended' : currentEffort}` },
+      );
+      if (!effort) return;
+      await cfg.update(`effort.${slot}`, effort.value, vscode.ConfigurationTarget.Global);
+    }
   }
   vscode.window.showInformationMessage('codelearn: model choices saved.');
 }

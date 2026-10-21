@@ -38,7 +38,7 @@ const SYSTEM = 'You are a careful teacher of code. Follow the instructions at th
  * question and answer. The prompt goes on stdin (see claudeInput), which has no length
  * limit and needs no shell quoting.
  */
-export function claudeArgs(model: string): string[] {
+export function claudeArgs(model: string, effort?: string): string[] {
   return [
     '-p',
     '--output-format',
@@ -51,6 +51,7 @@ export function claudeArgs(model: string): string[] {
     '',
     '--strict-mcp-config',
     '--no-session-persistence',
+    ...(effort ? ['--effort', effort] : []),
   ];
 }
 

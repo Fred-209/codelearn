@@ -29,6 +29,8 @@ describe('claudeArgs / claudeInput', () => {
     expect(args[args.indexOf('--tools') + 1]).toBe('');
     expect(args).toContain('--no-session-persistence');
     expect(args).toContain('--strict-mcp-config');
+    expect(args).not.toContain('--effort');
+    expect(claudeArgs('opus', 'high').slice(-2)).toEqual(['--effort', 'high']);
   });
 
   it('sends the instructions ahead of the content on stdin', () => {

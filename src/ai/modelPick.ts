@@ -11,6 +11,18 @@ export const SLOT_LABELS: Record<Slot, string> = {
   fast: 'Fast: quick explanations on demand',
 };
 
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** How hard the model should think, per slot: the map is worth it, quick explains aren't. */
+export const RECOMMENDED_EFFORT: Record<Slot, Effort> = { deep: 'high', standard: 'medium', fast: 'low' };
+
+/** `setting` is "auto" (the recommendation) or an effort level. */
+export function effortFor(slot: Slot, setting = 'auto'): Effort {
+  return (EFFORTS as string[]).includes(setting) ? (setting as Effort) : RECOMMENDED_EFFORT[slot];
+}
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -19,11 +31,13 @@ export interface ModelInfo {
   maxInputTokens: number;
 }
 
-// Ordered preferences per slot. Names change often, so these are loose patterns;
-// anything unmatched falls back to a sensible default below.
+// The recommended model for each slot, as ordered preferences. Names change often, so these
+// are loose patterns; anything unmatched falls back to a sensible default below.
+// Deep: the strongest reasoning (Opus, then GPT Sol). Standard: a capable mid-tier model
+// (Sonnet, then Sol). Fast: the cheapest small model (Haiku, then GPT Luna).
 const PREFERENCES: Record<Slot, RegExp[]> = {
-  deep: [/opus/i, /gpt-5(?!.*\b(mini|nano)\b)/i, /\bsol\b/i, /gemini.*pro/i, /sonnet/i, /\bo\d\b(?!.*mini)/i],
-  standard: [/sonnet/i, /gpt-5(?!.*\bnano\b)/i, /\bsol\b/i, /gpt-4\.1/i, /gemini.*pro/i, /opus/i],
+  deep: [/opus/i, /\bsol\b/i, /gpt-[5-9](?!.*\b(mini|nano|luna)\b)/i, /gemini.*pro/i, /sonnet/i, /\bo\d\b(?!.*mini)/i],
+  standard: [/sonnet/i, /\bsol\b/i, /gpt-[5-9](?!.*\b(nano|luna)\b)/i, /gpt-4\.1/i, /gemini.*pro/i, /opus/i],
   // GPT Luna is OpenAI's cheaper line.
   fast: [/haiku/i, /\bluna\b/i, /\b(mini|flash|nano)\b/i, /gpt-4o/i, /sonnet/i],
 };
