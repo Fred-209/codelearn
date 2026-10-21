@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 import type { CodelearnTestApi } from '../../../src/extension';
 import type { Lesson, RepoMap, Walkthrough } from '../../../src/store/types';
 import { MAP_VERSION } from '../../../src/store/types';
+import { Explainer } from '../../../src/learn/explain';
 
 const HANDLER = 'src/GetActivePaymentsHandler.cs';
 
@@ -214,6 +215,48 @@ describe('codelearn in VS Code', () => {
   it('opens map items such as flows in the panel', async () => {
     await vscode.commands.executeCommand('codelearn.openMapItem', 'flow', 'get-active');
     await until(() => tabLabels().includes('codelearn map'), 'map tab');
+  });
+
+  it('explains the method around the cursor, shades it, and offers Smaller and Larger', async () => {
+    // No C# extension here, so stand in for its outline.
+    const outline = vscode.languages.registerDocumentSymbolProvider(
+      { language: 'csharp' },
+      {
+        provideDocumentSymbols: () => {
+          const cls = new vscode.DocumentSymbol('GetActivePaymentsHandler', '', vscode.SymbolKind.Class, new vscode.Range(0, 0, 18, 1), new vscode.Range(0, 13, 0, 37));
+          cls.children.push(new vscode.DocumentSymbol('Handle', '', vscode.SymbolKind.Method, new vscode.Range(8, 4, 17, 5), new vscode.Range(8, 34, 8, 40)));
+          return [cls];
+        },
+      },
+    );
+    try {
+      const t = await Explainer.targetAt(doc, new vscode.Position(11, 12));
+      assert.strictEqual(t.label, 'method Handle');
+      assert.deepStrictEqual([t.startLine, t.endLine], [8, 17]);
+      assert.match(t.within ?? '', /^class GetActivePaymentsHandler/);
+      assert.ok(t.ladder && t.scope !== undefined && t.scope > 0 && t.scope < t.ladder.length - 1);
+      const smaller = Explainer.atScope(t.uri, t.ladder, t.scope - 1);
+      assert.ok(smaller.startLine > 8 && smaller.startLine <= 11 && smaller.endLine >= 11, `smaller: ${smaller.startLine}-${smaller.endLine}`);
+      const larger = Explainer.atScope(t.uri, t.ladder, t.scope + 1);
+      assert.strictEqual(larger.label, 'class GetActivePaymentsHandler');
+
+      const explainer = new Explainer(api.services);
+      await api.services.store.saveExplanation(explainer.cacheKey('line', t, doc), {
+        title: 'Handle',
+        body: 'Returns the active payment ids.',
+        conceptIds: [],
+        citations: [],
+        generatedAt: '2026-10-21T00:00:00Z',
+        model: 'test',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+      await api.panel.openExplain(t, 'line');
+      assert.deepStrictEqual(api.panel.highlighted(), { uri: doc.uri.toString(), startLine: 8, endLine: 17 });
+      await api.panel.openLesson('linq');
+      assert.strictEqual(api.panel.highlighted(), undefined);
+    } finally {
+      outline.dispose();
+    }
   });
 
   it('goes back to the previous page in the tab', async () => {

@@ -76,6 +76,8 @@ export type View =
       file: string;
       lines: string;
       zoom: Zoom;
+      /** Smaller and Larger, when the code was picked from the cursor. */
+      scope?: { smaller: boolean; larger: boolean };
       explanation?: Explanation;
       generating?: string;
       names: Record<string, string>;
@@ -212,7 +214,11 @@ function renderExplain(v: Extract<View, { kind: 'explain' }>): string {
   parts.push(`<header><div class="eyebrow">What's happening here?</div><h1>${esc(v.explanation?.title ?? v.file)}</h1><p class="muted">${esc(v.file)} · ${esc(v.lines)}</p></header>`);
   parts.push(`<div class="toolbar"><div class="seg" role="group" aria-label="Zoom">${ZOOMS.map(
     ([z, label]) => `<button data-action="zoom" data-zoom="${z}" class="${z === v.zoom ? 'sel' : ''}" aria-pressed="${z === v.zoom}">${label}</button>`,
-  ).join('')}</div><div class="actions"><button data-action="walk-range">Step through this</button></div></div>`);
+  ).join('')}</div>${
+    v.scope
+      ? `<div class="seg" role="group" aria-label="How much code"><button data-action="scope" data-dir="smaller" title="Explain less of the code around the cursor" ${v.scope.smaller ? '' : 'disabled'}>Smaller</button><button data-action="scope" data-dir="larger" title="Explain more of the code around the cursor" ${v.scope.larger ? '' : 'disabled'}>Larger</button></div>`
+      : ''
+  }<div class="actions"><button data-action="walk-range">Step through this</button></div></div>`);
   if (v.generating) {
     parts.push(`<p class="muted"><span class="spinner"></span>${esc(v.generating)}</p>`);
   } else if (v.explanation) {

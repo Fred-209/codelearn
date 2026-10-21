@@ -5,8 +5,9 @@ import { explainPrompt, quickExplainPrompt, Zoom } from '../ai/prompts';
 import type { Services } from '../services';
 import { hash } from '../store/store';
 import type { Explanation, RepoMap } from '../store/types';
-import { enclosingSymbol, numberedRange, readText, relPath, verifyOnDisk } from './files';
+import { numberedRange, scopesAt, readText, relPath, verifyOnDisk } from './files';
 import { numbered } from '../scan/digest';
+import { defaultScope, enclosingLabel, Scope } from './codeScope';
 
 function normalizeExplanation(v: unknown, model: string): Explanation {
   const o = obj(v);
@@ -29,23 +30,34 @@ export interface ExplainTarget {
   endLine: number;
   /** The exact text the learner selected, when it is only part of those lines. */
   focus?: string;
+  /** What the range is, e.g. "method GetActivePayments". */
+  label?: string;
+  /** The named scope around it, for context: "class PaymentService, lines 1-200". */
+  within?: string;
+  /** When picked from the cursor: the scopes around it, for Smaller and Larger. */
+  ladder?: Scope[];
+  scope?: number;
 }
 
 export class Explainer {
   constructor(private readonly s: Services) {}
 
-  /** The code region "this line" means: the selection, else the enclosing function, else nearby lines. */
+  /** The code region "this line" means: the selection, else the scope around the cursor (see codeScope.ts). */
   static targetFor(editor: vscode.TextEditor): Promise<ExplainTarget> {
     return Explainer.targetAt(editor.document, editor.selection.active, editor.selection);
   }
 
   static async targetAt(doc: vscode.TextDocument, pos: vscode.Position, selection?: vscode.Selection): Promise<ExplainTarget> {
     if (selection && !selection.isEmpty) return Explainer.targetForRange(doc, selection);
-    const sym = await enclosingSymbol(doc, pos);
-    if (sym && sym.range.end.line - sym.range.start.line < 120) {
-      return { uri: doc.uri, startLine: sym.range.start.line, endLine: sym.range.end.line };
-    }
-    return { uri: doc.uri, startLine: Math.max(0, pos.line - 12), endLine: Math.min(doc.lineCount - 1, pos.line + 12) };
+    const ladder = await scopesAt(doc, pos);
+    return Explainer.atScope(doc.uri, ladder, defaultScope(ladder));
+  }
+
+  /** Rung `index` of a ladder, e.g. one step smaller or larger than what was shown. */
+  static atScope(uri: vscode.Uri, ladder: Scope[], index: number): ExplainTarget {
+    const i = Math.max(0, Math.min(index, ladder.length - 1));
+    const s = ladder[i];
+    return { uri, startLine: s.start, endLine: s.end, label: s.label, within: enclosingLabel(ladder, i), ladder, scope: i };
   }
 
   /** A selected range. Keeps the exact selected text when it is only part of its lines. */
@@ -80,6 +92,7 @@ export class Explainer {
     if (zoom === 'line') {
       code = numberedRange(doc, target.startLine, target.endLine);
       extra = `The learner is looking at lines ${target.startLine + 1}-${target.endLine + 1}.`;
+      if (target.within) extra += ` This code is inside ${target.within}.`;
       if (target.focus) extra += ` They selected exactly this part, so focus on it:\n\`\`\`\n${target.focus}\n\`\`\``;
       extra += `\nFile context (start of file):\n${numbered(doc.getText(), 25)}`;
     } else if (zoom === 'file') {

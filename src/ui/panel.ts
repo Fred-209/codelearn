@@ -87,15 +87,23 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
 
   async openExplain(target: ExplainTarget, zoom: Zoom, force = false): Promise<void> {
     const where = `${relPath(target.uri)}:${target.startLine + 1}`;
+    // Smaller and Larger replace the page rather than stacking, so key a ladder on its cursor line.
+    const at = target.ladder ? `at:${target.ladder[0].start}` : `${target.startLine}-${target.endLine}:${target.focus ?? ''}`;
     this.visit({
-      key: `explain:${target.uri.toString()}:${target.startLine}-${target.endLine}:${target.focus ?? ''}`,
+      key: `explain:${target.uri.toString()}:${at}`,
       title: `What's happening in ${where}`,
       open: () => this.openExplain(target, zoom),
     });
     this.explainTarget = target;
+    this.highlight(zoom === 'line' ? target : undefined);
     const names = await this.names();
     const span = target.startLine === target.endLine ? `line ${target.startLine + 1}` : `lines ${target.startLine + 1}-${target.endLine + 1}`;
-    const base = { kind: 'explain' as const, file: relPath(target.uri), lines: target.focus ? `your selection, ${span}` : span, zoom, names };
+    const lines = target.focus ? `your selection, ${span}` : target.label ? `${target.label} · ${span}` : span;
+    const scope =
+      zoom === 'line' && target.ladder && target.scope !== undefined
+        ? { smaller: target.scope > 0, larger: target.scope < target.ladder.length - 1 }
+        : undefined;
+    const base = { kind: 'explain' as const, file: relPath(target.uri), lines, zoom, names, scope };
     const cached = force ? undefined : await this.explainer.cached(zoom, target);
     if (cached) return this.show({ ...base, explanation: cached });
 
@@ -112,6 +120,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     this.visit({ key: `quick:${word}:${uri.toString()}`, title: word, open: () => this.showQuick(word, uri, line) });
     const target: ExplainTarget = { uri, startLine: Math.max(0, line - 1), endLine: line - 1 };
     this.explainTarget = target;
+    this.highlight(undefined);
     const base = { kind: 'explain' as const, file: relPath(uri), lines: `line ${line}`, zoom: 'line' as const, names: await this.names() };
     const cached = await this.explainer.getQuickCached(word, uri);
     if (cached) return this.show({ ...base, explanation: cached });
@@ -202,6 +211,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   // ---- plumbing ----
 
   private show(view: View): void {
+    if (view.kind !== 'explain') this.highlight(undefined);
     this.view = view;
     const panel = this.ensurePanel();
     panel.title = titleFor(view);
@@ -224,6 +234,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     this.panel.iconPath = vscode.Uri.joinPath(this.s.context.extensionUri, 'media', 'codelearn.svg');
     this.panel.webview.onDidReceiveMessage((m) => this.onMessage(m).catch((e) => reportError(this.s, 'Something went wrong', e)));
     this.panel.onDidDispose(() => {
+      this.highlight(undefined);
       const wasWalk = this.view?.kind === 'walkthrough';
       this.panel = undefined;
       this.view = undefined;
@@ -279,6 +290,11 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
       case 'zoom':
         if (this.explainTarget) return this.openExplain(this.explainTarget, m.zoom as Zoom);
         return;
+      case 'scope': {
+        const t = this.explainTarget;
+        if (!t?.ladder || t.scope === undefined) return;
+        return this.openExplain(Explainer.atScope(t.uri, t.ladder, t.scope + (m.dir === 'larger' ? 1 : -1)), 'line');
+      }
       case 'wrong':
         return this.reportWrong();
       case 'ask':
@@ -345,6 +361,32 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   dispose(): void {
     this.work?.cancel();
     this.panel?.dispose();
+    this.marker.dispose();
+  }
+
+  /** Shades the lines being explained in any editor showing that file, so it's clear what was picked. */
+  private readonly marker = vscode.window.createTextEditorDecorationType({
+    backgroundColor: new vscode.ThemeColor('editor.rangeHighlightBackground'),
+    isWholeLine: true,
+  });
+  private marked: ExplainTarget | undefined;
+
+  private highlight(target: ExplainTarget | undefined): void {
+    this.marked = target;
+    this.applyHighlight();
+  }
+
+  applyHighlight(): void {
+    const t = this.marked;
+    for (const editor of vscode.window.visibleTextEditors) {
+      const on = t && editor.document.uri.toString() === t.uri.toString();
+      editor.setDecorations(this.marker, on ? [new vscode.Range(t.startLine, 0, t.endLine, 0)] : []);
+    }
+  }
+
+  /** The lines currently shaded, for tests. */
+  highlighted(): { uri: string; startLine: number; endLine: number } | undefined {
+    return this.marked && { uri: this.marked.uri.toString(), startLine: this.marked.startLine, endLine: this.marked.endLine };
   }
 }
 

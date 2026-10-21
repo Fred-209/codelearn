@@ -116,6 +116,7 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
     walks,
     status,
     vscode.window.registerTreeDataProvider('codelearn.map', tree),
+    vscode.window.onDidChangeVisibleTextEditors(() => panel.applyHighlight()),
     vscode.languages.registerHoverProvider({ scheme: 'file' }, new TeachingHover(services, explainer)),
 
     cmd('codelearn.buildMap', () => scanner.build('full')),
