@@ -110,6 +110,11 @@
         "category": "codelearn"
       },
       {
+        "command": "codelearn.explainRange",
+        "title": "Explain this range",
+        "category": "codelearn"
+      },
+      {
         "command": "codelearn.walkthrough.next",
         "title": "Next step",
         "category": "codelearn"
@@ -207,6 +212,10 @@
         },
         {
           "command": "codelearn.explainWord",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.explainRange",
           "when": "false"
         },
         {

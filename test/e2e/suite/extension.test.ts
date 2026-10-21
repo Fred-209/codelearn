@@ -136,6 +136,28 @@ describe('codelearn in VS Code', () => {
     assert.match(text, /codelearn: explain/);
   });
 
+  it('does not offer to explain plain words or words in comments', async () => {
+    assert.doesNotMatch(await hoverText('the ids'), /codelearn/);
+    assert.doesNotMatch(await hoverText('payments for'), /codelearn/);
+  });
+
+  it('explains the whole selection when hovering inside it', async () => {
+    const editor = vscode.window.activeTextEditor!;
+    const start = doc.getText().indexOf('.Where(');
+    const end = doc.getText().indexOf('.ToList()') + '.ToList()'.length;
+    editor.selection = new vscode.Selection(doc.positionAt(start), doc.positionAt(end));
+    try {
+      const text = await hoverText('Select');
+      assert.match(text, /Your selection/);
+      assert.match(text, /lines 15–17/);
+      assert.match(text, /In this selection: \[LINQ\]/);
+      assert.match(text, /Explain selection/);
+      assert.match(text, /Step through/);
+    } finally {
+      editor.selection = new vscode.Selection(0, 0, 0, 0);
+    }
+  });
+
   it('shortens the hover once a concept is marked known, and keeps the lesson link', async () => {
     await vscode.commands.executeCommand('codelearn.setConceptStatus', 'LINQ', 'known');
     assert.strictEqual(api.services.store.getStatus('LINQ'), 'known');

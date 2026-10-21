@@ -17,3 +17,5 @@ public class GetActivePaymentsHandler
             .ToList();
     }
 }
+
+// Returns the ids of the active payments for the account.

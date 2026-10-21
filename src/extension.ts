@@ -114,8 +114,15 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
       if (t) await panel.openExplain(t, 'line');
     }),
     cmd('codelearn.explainWord', (word: string, uri: string, line: number) => panel.showQuick(word, vscode.Uri.parse(uri), line)),
-    cmd('codelearn.stepThrough', async (uri?: string, line?: number) => {
-      // From a hover we get the hovered location; from menus, the cursor.
+    cmd('codelearn.explainRange', async (uri: string, startLine: number, startChar: number, endLine: number, endChar: number) => {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+      await panel.openExplain(Explainer.targetForRange(doc, new vscode.Range(startLine, startChar, endLine, endChar)), 'line');
+    }),
+    cmd('codelearn.stepThrough', async (uri?: string, line?: number, endLine?: number) => {
+      // From a hover we get the hovered location (1-based lines); from menus, the cursor.
+      if (typeof uri === 'string' && typeof line === 'number' && typeof endLine === 'number') {
+        return walkRange({ uri: vscode.Uri.parse(uri), startLine: line - 1, endLine: endLine - 1 });
+      }
       if (typeof uri === 'string' && typeof line === 'number') {
         const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
         return walkRange(await Explainer.targetAt(doc, new vscode.Position(line - 1, 0)));

@@ -60,7 +60,8 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
   async openExplain(target: ExplainTarget, zoom: Zoom, force = false): Promise<void> {
     this.explainTarget = target;
     const names = await this.names();
-    const base = { kind: 'explain' as const, file: relPath(target.uri), lines: `lines ${target.startLine + 1}-${target.endLine + 1}`, zoom, names };
+    const span = target.startLine === target.endLine ? `line ${target.startLine + 1}` : `lines ${target.startLine + 1}-${target.endLine + 1}`;
+    const base = { kind: 'explain' as const, file: relPath(target.uri), lines: target.focus ? `your selection, ${span}` : span, zoom, names };
     const cached = force ? undefined : await this.explainer.cached(zoom, target);
     if (cached) return this.show({ ...base, explanation: cached });
 

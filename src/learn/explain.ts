@@ -27,6 +27,8 @@ export interface ExplainTarget {
   /** 0-based inclusive line range the learner is asking about. */
   startLine: number;
   endLine: number;
+  /** The exact text the learner selected, when it is only part of those lines. */
+  focus?: string;
 }
 
 export class Explainer {
@@ -38,7 +40,7 @@ export class Explainer {
   }
 
   static async targetAt(doc: vscode.TextDocument, pos: vscode.Position, selection?: vscode.Selection): Promise<ExplainTarget> {
-    if (selection && !selection.isEmpty) return { uri: doc.uri, startLine: selection.start.line, endLine: selection.end.line };
+    if (selection && !selection.isEmpty) return Explainer.targetForRange(doc, selection);
     const sym = await enclosingSymbol(doc, pos);
     if (sym && sym.range.end.line - sym.range.start.line < 120) {
       return { uri: doc.uri, startLine: sym.range.start.line, endLine: sym.range.end.line };
@@ -46,9 +48,19 @@ export class Explainer {
     return { uri: doc.uri, startLine: Math.max(0, pos.line - 12), endLine: Math.min(doc.lineCount - 1, pos.line + 12) };
   }
 
+  /** A selected range. Keeps the exact selected text when it is only part of its lines. */
+  static targetForRange(doc: vscode.TextDocument, range: vscode.Range): ExplainTarget {
+    const startLine = range.start.line;
+    const endLine = range.end.character === 0 && range.end.line > startLine ? range.end.line - 1 : range.end.line;
+    const selected = doc.getText(range).trim();
+    const whole = doc.getText(new vscode.Range(startLine, 0, endLine, doc.lineAt(endLine).text.length)).trim();
+    const focus = selected && selected !== whole && selected.length <= 2000 ? selected : undefined;
+    return { uri: doc.uri, startLine, endLine, focus };
+  }
+
   cacheKey(zoom: Zoom, target: ExplainTarget, doc: vscode.TextDocument): string {
     const file = relPath(target.uri);
-    const code = zoom === 'line' ? numberedRange(doc, target.startLine, target.endLine) : doc.getText();
+    const code = zoom === 'line' ? numberedRange(doc, target.startLine, target.endLine) + (target.focus ? `\n${target.focus}` : '') : doc.getText();
     return `explain|${zoom}|${file}|${hash(code)}|${this.s.store.profileHash()}`;
   }
 
@@ -67,7 +79,9 @@ export class Explainer {
     let extra = '';
     if (zoom === 'line') {
       code = numberedRange(doc, target.startLine, target.endLine);
-      extra = `The learner is looking at lines ${target.startLine + 1}-${target.endLine + 1}. File context (start of file):\n${numbered(doc.getText(), 25)}`;
+      extra = `The learner is looking at lines ${target.startLine + 1}-${target.endLine + 1}.`;
+      if (target.focus) extra += ` They selected exactly this part, so focus on it:\n\`\`\`\n${target.focus}\n\`\`\``;
+      extra += `\nFile context (start of file):\n${numbered(doc.getText(), 25)}`;
     } else if (zoom === 'file') {
       code = clip(numbered(doc.getText(), 800), 45_000);
     } else {

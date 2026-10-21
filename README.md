@@ -6,6 +6,7 @@ A VS Code extension that teaches you an unfamiliar codebase from inside the edit
 
 - **Map of the repo.** One scan finds the main areas, the main flows through the code, the concepts in use (language features, libraries, patterns, architecture), business terms, and the team's conventions. Conventions come from AI instruction files (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, Cursor rules, skills) and are checked against the code: each one is marked confirmed, contradicted or unchecked.
 - **Teaching hovers.** Point at code the map knows (`IMediator`, `.Where(`, `SettlementBatch`) to get a short explanation plus a note on how this repo uses it. The hover has links to open the lesson, step through the code, mark it as known, or report it as wrong. Hovers read saved text, so they're instant and use no AI requests.
+- **Selections.** Select some code and hover inside it to get a hover for the whole selection. It lists the concepts and business terms in the selection, and has links to *Explain selection* (which focuses on exactly what you selected) and *Step through*. Words the map doesn't know get a one-line *explain* link, except plain English words and anything in comments or strings.
 - **Lessons.** A tab beside your code covers each concept. You can switch depth (Refresher, Standard, From scratch), see comparisons to things you already know, common pitfalls, and where the repo uses it. Prerequisites are clickable, there are docs and video search links, a check question, and *Ask a question*.
 - **What's happening here?** (`Ctrl+Alt+/`) explains the code at your cursor at three zoom levels: this code, this file, and the bigger flow it's part of.
 - **Walkthroughs.** These step through a flow or a function. Each step appears as a card under the line it explains. *Open in panel* moves the walkthrough into a side panel at the same step, and codelearn remembers which view you prefer.
@@ -57,7 +58,7 @@ Most usage happens once per repo, during the first scan: one big request plus ab
 | `codelearn.claudeCode.path` | empty | Path to `claude`, if codelearn can't find it. |
 | `codelearn.models.deep` / `.standard` / `.fast` | `auto` | Model per slot (id, family or a name fragment; for Claude Code, `opus`/`sonnet`/`haiku` or a full model name). |
 | `codelearn.hover.enabled` | `true` | Teaching hovers on mapped concepts. |
-| `codelearn.hover.showForUnknown` | `true` | One-line "explain" link on symbols the map doesn't know. |
+| `codelearn.hover.showForUnknown` | `true` | One-line "explain" link on code the map doesn't know (not on plain words, comments or strings). |
 | `codelearn.hover.autoGenerate` | `false` | Explain unknown symbols automatically on hover (one request per new symbol, saved). |
 | `codelearn.walkthrough.defaultView` | `inline` | Where walkthroughs first appear; after that your last choice is remembered. |
 | `codelearn.scan.maxFiles` | `1500` | Files read when building the map. |
