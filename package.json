@@ -59,7 +59,7 @@
       },
       {
         "command": "codelearn.searchConcept",
-        "title": "Find a concept\u2026",
+        "title": "Find a concept…",
         "category": "codelearn",
         "icon": "$(search)"
       },
@@ -288,8 +288,16 @@
       "properties": {
         "codelearn.provider": {
           "type": "string",
-          "enum": ["auto", "copilot", "claude-code"],
-          "enumItemLabels": ["Automatic", "GitHub Copilot", "Claude Code"],
+          "enum": [
+            "auto",
+            "copilot",
+            "claude-code"
+          ],
+          "enumItemLabels": [
+            "Automatic",
+            "GitHub Copilot",
+            "Claude Code"
+          ],
           "enumDescriptions": [
             "GitHub Copilot when VS Code offers its models, otherwise Claude Code when it is installed.",
             "Models from GitHub Copilot Chat, through VS Code's Language Model API.",
@@ -325,24 +333,45 @@
         },
         "codelearn.effort.deep": {
           "type": "string",
-          "enum": ["auto", "low", "medium", "high", "xhigh", "max"],
+          "enum": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "default": "auto",
           "scope": "machine",
-          "markdownDescription": "How hard the Deep model thinks. `auto` is the recommendation, `high`. Claude Code only: Copilot's API doesn't let extensions set effort, so Copilot uses its own default for the model."
+          "markdownDescription": "How hard the Deep model thinks. `auto` is the recommendation, `high`. Copilot models accept `low`, `medium` and `high` (higher values are sent as `high`); on VS Code versions that can't pass effort to Copilot, the effort chosen in the chat model picker is used instead."
         },
         "codelearn.effort.standard": {
           "type": "string",
-          "enum": ["auto", "low", "medium", "high", "xhigh", "max"],
+          "enum": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "default": "auto",
           "scope": "machine",
-          "markdownDescription": "How hard the Standard model thinks. `auto` is the recommendation, `medium`. Claude Code only."
+          "markdownDescription": "How hard the Standard model thinks. `auto` is the recommendation, `medium`."
         },
         "codelearn.effort.fast": {
           "type": "string",
-          "enum": ["auto", "low", "medium", "high", "xhigh", "max"],
+          "enum": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "default": "auto",
           "scope": "machine",
-          "markdownDescription": "How hard the Fast model thinks. `auto` is the recommendation, `low`. Claude Code only."
+          "markdownDescription": "How hard the Fast model thinks. `auto` is the recommendation, `low`."
         },
         "codelearn.hover.enabled": {
           "type": "boolean",
@@ -424,6 +453,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "highlight.js": "11.11.1",
     "markdown-it": "^14.1.0"
   }
 }

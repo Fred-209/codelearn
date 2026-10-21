@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { AIProvider, AIRequest, AIResult, AIUnavailableError } from './provider';
-import { ModelInfo, pickModel, Slot } from './modelPick';
+import { Effort, effortFor, ModelInfo, pickModel, Slot } from './modelPick';
 
 /**
  * Uses the models VS Code exposes to extensions (GitHub Copilot's, including the
@@ -34,10 +34,30 @@ export class VsCodeLmProvider implements AIProvider {
     // The Language Model API has no system role; instructions go first in the user turn.
     const messages = [vscode.LanguageModelChatMessage.User(`${req.system}\n\n---\n\n${req.user}`)];
     const cts = token ? undefined : new vscode.CancellationTokenSource();
-    try {
-      const response = await model.sendRequest(messages, { justification: req.justification }, token ?? cts!.token);
+    const cancel = token ?? cts!.token;
+    const effort = copilotEffort(effortFor(req.slot, effortSetting(req.slot)));
+    const send = async (withEffort: boolean) => {
+      const options: CopilotRequestOptions = { justification: req.justification };
+      if (withEffort) options.configuration = { reasoningEffort: effort };
+      const response = await model.sendRequest(messages, options, cancel);
       let text = '';
       for await (const chunk of response.text) text += chunk;
+      return text;
+    };
+    try {
+      let text: string;
+      if (this.noEffort.has(model.id)) {
+        text = await send(false);
+      } else {
+        try {
+          text = await send(true);
+        } catch (e) {
+          // A model without effort levels may reject the setting: ask again without it, once.
+          if (cancel.isCancellationRequested || isAccessError(e)) throw e;
+          this.noEffort.add(model.id);
+          text = await send(false);
+        }
+      }
       return { text, model: model.name, usage: await estimateUsage(model, messages[0], text) };
     } catch (e) {
       throw friendlyError(e);
@@ -45,6 +65,34 @@ export class VsCodeLmProvider implements AIProvider {
       cts?.dispose();
     }
   }
+
+  /** Models that rejected a reasoning effort this session. */
+  private readonly noEffort = new Set<string>();
+}
+
+/**
+ * VS Code merges `configuration` into the model's per-user settings (the effort chosen in the
+ * chat model picker), and Copilot reads `reasoningEffort` from it. Not in the published API
+ * typings yet; versions that don't know it ignore it, and the model then uses the picker's effort.
+ */
+type CopilotRequestOptions = vscode.LanguageModelChatRequestOptions & { configuration?: { reasoningEffort: string } };
+
+/** Copilot's models offer low, medium and high. */
+export function copilotEffort(effort: Effort): 'low' | 'medium' | 'high' {
+  return effort === 'xhigh' || effort === 'max' ? 'high' : effort;
+}
+
+/** Errors that asking again without the effort setting won't fix. */
+function isAccessError(e: unknown): boolean {
+  if (e instanceof Error && (e.name === 'ChatQuotaExceeded' || e.name === 'ChatRateLimited')) return true;
+  return (
+    e instanceof vscode.LanguageModelError &&
+    (e.code === vscode.LanguageModelError.NoPermissions.name || e.code === vscode.LanguageModelError.Blocked.name)
+  );
+}
+
+function effortSetting(slot: Slot): string {
+  return vscode.workspace.getConfiguration('codelearn').get<string>(`effort.${slot}`, 'auto');
 }
 
 /** Copilot doesn't report tokens, so count them with the model's own tokenizer. */

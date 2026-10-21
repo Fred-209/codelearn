@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { esc, page, renderCitations, renderView } from '../src/ui/render';
+import { esc, markdown, page, renderCitations, renderView } from '../src/ui/render';
 import type { Concept, Lesson } from '../src/store/types';
 
 const concept: Concept = {
@@ -89,5 +89,20 @@ describe('helpers', () => {
     const html = page('<p>x</p>', 'abc', 'vscode-resource:');
     expect(html).toContain("script-src 'nonce-abc'");
     expect(html).toContain("default-src 'none'");
+  });
+});
+
+describe('code highlighting', () => {
+  it('colours code blocks by language and still escapes the code', () => {
+    const html = markdown('```csharp\nvar s = "<script>"; // hi\n```');
+    expect(html).toContain('hljs-keyword');
+    expect(html).toContain('hljs-string');
+    expect(html).toContain('hljs-comment');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>');
+  });
+
+  it('guesses the language when the block has none', () => {
+    expect(markdown('```\nfunction add(a, b) { return a + b; }\n```')).toContain('hljs-');
   });
 });

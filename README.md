@@ -7,7 +7,7 @@ A VS Code extension that teaches you an unfamiliar codebase from inside the edit
 - **Map of the repo.** One scan finds the main areas, the main flows through the code, the concepts in use (language features, libraries, patterns, architecture), business terms, and the team's conventions. Conventions come from AI instruction files (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, Cursor rules, skills) and are checked against the code: each one is marked confirmed, contradicted or unchecked.
 - **Teaching hovers.** Point at code the map knows (`IMediator`, `.Where(`, `SettlementBatch`) to get a short explanation plus a note on how this repo uses it. The hover has links to open the lesson, step through the code, mark it as known, or report it as wrong. Hovers read saved text, so they're instant and use no AI requests.
 - **Selections.** Select some code and hover inside it to get a hover for the whole selection. It lists the concepts and business terms in the selection, and has links to *Explain selection* (which focuses on exactly what you selected) and *Step through*. Words the map doesn't know get a one-line *explain* link, except plain English words and anything in comments or strings.
-- **Lessons.** A tab beside your code covers each concept. You can switch depth (Refresher, Standard, From scratch), see comparisons to things you already know, common pitfalls, and where the repo uses it. Prerequisites are clickable, there are docs and video search links, a check question, and *Ask a question*.
+- **Lessons.** A colour-coded tab beside your code covers each concept, with syntax-highlighted examples in your theme's colours. You can switch depth (Refresher, Standard, From scratch), see comparisons to things you already know, common pitfalls, and where the repo uses it. Prerequisites are clickable, there are docs and video search links, a check question, and *Ask a question*.
 - **What's happening here?** (`Ctrl+Alt+/`) explains the code at your cursor at three zoom levels: this code, this file, and the bigger flow it's part of.
 - **Walkthroughs.** These step through a flow or a function. Each step appears as a card under the line it explains. *Open in panel* moves the walkthrough into a side panel at the same step, and codelearn remembers which view you prefer.
 - **Trust marks.** Every claim about the repo cites file and line with an exact quote, which codelearn checks against the real file. Results are labelled *Checked against the code* or *AI's guess*. *This is wrong* rewrites the content with a stronger model.
@@ -37,7 +37,7 @@ Jobs are split across three model slots. Each uses a recommended model by defaul
 | Standard | concept descriptions, lessons, explanations | Sonnet-class, else GPT Sol (`sonnet`) | medium |
 | Fast | quick explanations of words the map doesn't know | Haiku-class, else GPT Luna (`haiku`) | low |
 
-Effort is applied on Claude Code (`--effort`). Copilot's Language Model API doesn't let extensions set effort, so Copilot uses its default for the model.
+On Claude Code, effort is passed with `--effort`. On Copilot, codelearn asks for the effort with each request (`low`, `medium` or `high`), which recent VS Code builds pass on to Copilot's models. Older builds ignore it and use the effort chosen for that model in the chat model picker. If a model rejects the setting, codelearn asks again without it.
 
 **codelearn: Show AI usage** (also in the sidebar's ... menu) lists every request codelearn has made, by model and kind, with token counts. Claude Code reports exact tokens; for Copilot they are estimated with the model's tokenizer.
 
@@ -61,7 +61,7 @@ Most usage happens once per repo, during the first scan: one big request plus ab
 | `codelearn.provider` | `auto` | `copilot`, `claude-code`, or `auto`. Per machine. |
 | `codelearn.claudeCode.path` | empty | Path to `claude`, if codelearn can't find it. |
 | `codelearn.models.deep` / `.standard` / `.fast` | `auto` | Model per slot (id, family or a name fragment; for Claude Code, `opus`/`sonnet`/`haiku` or a full model name). Per machine. |
-| `codelearn.effort.deep` / `.standard` / `.fast` | `auto` | Effort per slot (`low` to `max`). Claude Code only. Per machine. |
+| `codelearn.effort.deep` / `.standard` / `.fast` | `auto` | Effort per slot (`low` to `max`; Copilot takes up to `high`). Per machine. |
 | `codelearn.hover.enabled` | `true` | Teaching hovers on mapped concepts. |
 | `codelearn.hover.showForUnknown` | `true` | One-line "explain" link on code the map doesn't know (not on plain words, comments or strings). |
 | `codelearn.hover.autoGenerate` | `false` | Explain unknown symbols automatically on hover (one request per new symbol, saved). |

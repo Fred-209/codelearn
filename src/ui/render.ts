@@ -1,6 +1,24 @@
 // HTML for the codelearn panel. Pure (no vscode import) so it can be tested.
 // Everything model-written goes through markdown-it with raw HTML disabled, or esc().
 
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import cpp from 'highlight.js/lib/languages/cpp';
+import csharp from 'highlight.js/lib/languages/csharp';
+import css from 'highlight.js/lib/languages/css';
+import go from 'highlight.js/lib/languages/go';
+import java from 'highlight.js/lib/languages/java';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import kotlin from 'highlight.js/lib/languages/kotlin';
+import php from 'highlight.js/lib/languages/php';
+import python from 'highlight.js/lib/languages/python';
+import ruby from 'highlight.js/lib/languages/ruby';
+import rust from 'highlight.js/lib/languages/rust';
+import sql from 'highlight.js/lib/languages/sql';
+import typescript from 'highlight.js/lib/languages/typescript';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
 import MarkdownIt from 'markdown-it';
 import { trustLevel } from '../learn/anchor';
 import type { Zoom } from '../ai/prompts';
@@ -16,7 +34,21 @@ import type {
 } from '../store/types';
 import { searchUrl, videoSearchUrl } from './links';
 
-const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
+const LANGUAGES = { bash, cpp, csharp, css, go, java, javascript, json, kotlin, php, python, ruby, rust, sql, typescript, xml, yaml };
+for (const [name, lang] of Object.entries(LANGUAGES)) hljs.registerLanguage(name, lang);
+
+/** Syntax colours for code blocks. highlight.js escapes the code itself. */
+function highlight(code: string, lang: string): string {
+  try {
+    const known = lang && hljs.getLanguage(lang);
+    const out = known ? hljs.highlight(code, { language: lang, ignoreIllegals: true }) : hljs.highlightAuto(code);
+    return `<pre class="hljs"><code>${out.value}</code></pre>`;
+  } catch {
+    return ''; // markdown-it falls back to plain escaped code
+  }
+}
+
+const md = new MarkdownIt({ html: false, linkify: false, breaks: false, highlight });
 
 export function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -105,26 +137,26 @@ function renderLesson(v: Extract<View, { kind: 'lesson' }>): string {
     const l = v.lesson;
     parts.push(`<section class="body">${markdown(l.body)}</section>`);
     if (l.comparisons.length) {
-      parts.push(`<section class="box"><h2>Compared with what you know</h2><table>${l.comparisons
+      parts.push(`<section class="box tint-purple"><h2>Compared with what you know</h2><table>${l.comparisons
         .map((k) => `<tr><td><strong>${esc(k.here)}</strong></td><td>≈ ${esc(k.known)}</td><td class="muted">${esc(k.note)}</td></tr>`)
         .join('')}</table></section>`);
     }
     if (l.pitfalls.length) {
-      parts.push(`<section><h2>Watch out for</h2><ul>${l.pitfalls.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></section>`);
+      parts.push(`<section class="box tint-orange"><h2>Watch out for</h2><ul>${l.pitfalls.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></section>`);
     }
   }
 
   if (c.prereqs.length) {
-    parts.push(`<section><h2>Helps to know first</h2><div class="chips">${c.prereqs
+    parts.push(`<section class="accent-blue"><h2>Helps to know first</h2><div class="chips">${c.prereqs
       .map((p) => `<button class="chip" data-action="lesson" data-ref="${esc(p)}">${esc(v.names[p] ?? p)}</button>`)
       .join('')}</div></section>`);
   }
 
   if (c.usage || c.citations.length) {
-    parts.push(`<section><h2>In this repo</h2>${c.usage ? `<p>${esc(c.usage)}</p>` : ''}${renderCitations(c.citations)}</section>`);
+    parts.push(`<section class="box tint-green"><h2>In this repo</h2>${c.usage ? `<p>${esc(c.usage)}</p>` : ''}${renderCitations(c.citations)}</section>`);
   }
 
-  parts.push(`<section><h2>Learn more</h2><p>
+  parts.push(`<section class="accent-blue"><h2>Learn more</h2><p>
     <a href="${esc(searchUrl(c.docsSite, query))}">Search ${esc(c.docsSite || 'the docs')} for “${esc(query)}”</a><br>
     <a href="${esc(videoSearchUrl(query))}">Find videos on YouTube</a>
   </p></section>`);
@@ -132,7 +164,7 @@ function renderLesson(v: Extract<View, { kind: 'lesson' }>): string {
   if (v.lesson?.check && !v.generating) parts.push(renderCheck(v.lesson.check));
 
   if (v.answers.length) {
-    parts.push(`<section><h2>Your questions</h2>${v.answers
+    parts.push(`<section class="accent-blue"><h2>Your questions</h2>${v.answers
       .map((a) => `<div class="qa"><p class="q">${esc(a.question)}</p>${a.answer ? markdown(a.answer) : '<p class="muted"><span class="spinner"></span>Thinking…</p>'}</div>`)
       .join('')}</section>`);
   }
@@ -148,7 +180,7 @@ function renderLesson(v: Extract<View, { kind: 'lesson' }>): string {
 }
 
 function renderCheck(check: NonNullable<Lesson['check']>): string {
-  return `<section class="box check"><h2>Check yourself</h2><p>${esc(check.question)}</p>
+  return `<section class="box tint-yellow check"><h2>Check yourself</h2><p>${esc(check.question)}</p>
     <div class="options">${check.options
       .map((o, i) => `<button class="opt" data-action="answer" data-correct="${i === check.answer}">${esc(o)}</button>`)
       .join('')}</div>
@@ -187,11 +219,11 @@ function renderExplain(v: Extract<View, { kind: 'explain' }>): string {
     const e = v.explanation;
     parts.push(`<section class="body">${markdown(e.body)}</section>`);
     if (e.conceptIds.length) {
-      parts.push(`<section><h2>Concepts at play</h2><div class="chips">${e.conceptIds
+      parts.push(`<section class="accent-blue"><h2>Concepts at play</h2><div class="chips">${e.conceptIds
         .map((id) => `<button class="chip" data-action="lesson" data-ref="${esc(id)}">${esc(v.names[id] ?? id)}</button>`)
         .join('')}</div></section>`);
     }
-    parts.push(`<section><h2>References</h2>${renderCitations(e.citations)}</section>`);
+    parts.push(`<section class="box tint-green"><h2>References</h2>${renderCitations(e.citations)}</section>`);
     parts.push(`<footer><button data-action="wrong">This is wrong</button><span class="muted">Written by ${esc(e.model)}</span></footer>`);
   }
   return parts.join('\n');
@@ -274,16 +306,48 @@ function notFound(): string {
 }
 
 export const STYLES = `
-:root { color-scheme: light dark; }
+:root {
+  color-scheme: light dark;
+  /* Accent colours from the user's theme, so light and dark themes both work. */
+  --c-blue: var(--vscode-charts-blue, #3794ff);
+  --c-green: var(--vscode-charts-green, #89d185);
+  --c-yellow: var(--vscode-charts-yellow, #cca700);
+  --c-orange: var(--vscode-charts-orange, #d18616);
+  --c-purple: var(--vscode-charts-purple, #b180d7);
+}
 body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 4px 20px 32px; line-height: 1.55; max-width: 820px; }
+header { padding-bottom: 10px; border-bottom: 2px solid color-mix(in srgb, var(--c-blue) 45%, transparent); }
 h1 { font-size: 1.6em; margin: 4px 0 6px; line-height: 1.25; }
-h2 { font-size: .8em; text-transform: uppercase; letter-spacing: .06em; color: var(--vscode-descriptionForeground); margin: 22px 0 8px; }
-.eyebrow { font-size: .85em; color: var(--vscode-descriptionForeground); text-transform: capitalize; }
+h2 { font-size: .8em; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--accent, var(--vscode-descriptionForeground)); margin: 22px 0 8px; }
+.eyebrow { font-size: .85em; font-weight: 600; color: var(--c-blue); text-transform: capitalize; }
+.body h1, .body h2, .body h3, .body h4 { color: var(--c-blue); text-transform: none; letter-spacing: normal; margin: 20px 0 6px; }
+.body h1, .body h2 { font-size: 1.25em; }
+.body h3 { font-size: 1.12em; padding-bottom: 3px; border-bottom: 1px solid color-mix(in srgb, var(--c-blue) 30%, transparent); }
+.body h4 { font-size: 1em; }
+.body strong { color: var(--vscode-editor-foreground, var(--vscode-foreground)); }
+.body em { color: var(--c-purple); }
+li::marker { color: var(--accent, var(--c-blue)); }
+blockquote { margin: 12px 0; padding: 6px 12px; border-left: 3px solid var(--c-blue); background: color-mix(in srgb, var(--c-blue) 8%, transparent); }
+.accent-blue { --accent: var(--c-blue); }
+.tint-blue { --accent: var(--c-blue); }
+.tint-green { --accent: var(--c-green); }
+.tint-yellow { --accent: var(--c-yellow); }
+.tint-orange { --accent: var(--c-orange); }
+.tint-purple { --accent: var(--c-purple); }
 .lead { font-size: 1.05em; margin: 0; }
 .muted { color: var(--vscode-descriptionForeground); }
-code { font-family: var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; }
-pre { background: var(--vscode-textCodeBlock-background); padding: 10px 12px; border-radius: 4px; overflow-x: auto; }
-pre code { padding: 0; background: none; }
+code { font-family: var(--vscode-editor-font-family); color: var(--vscode-symbolIcon-variableForeground, #75beff); background: var(--vscode-textPreformat-background, var(--vscode-textCodeBlock-background)); padding: 1px 4px; border-radius: 3px; }
+pre { background: var(--vscode-textCodeBlock-background); padding: 10px 12px; border-radius: 4px; overflow-x: auto; border-left: 3px solid color-mix(in srgb, var(--c-blue) 50%, transparent); }
+pre code { padding: 0; background: none; color: var(--vscode-editor-foreground, var(--vscode-foreground)); }
+/* Code colours borrowed from the theme's debug and symbol colours, which follow its syntax palette. */
+.hljs-keyword, .hljs-literal, .hljs-selector-tag, .hljs-doctag { color: var(--vscode-debugTokenExpression-boolean, #4e94ce); }
+.hljs-string, .hljs-regexp, .hljs-symbol, .hljs-char\\.escape_ { color: var(--vscode-debugTokenExpression-string, #ce9178); }
+.hljs-number { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
+.hljs-title.function_, .hljs-function .hljs-title { color: var(--vscode-debugTokenExpression-name, #c586c0); }
+.hljs-title.class_, .hljs-type, .hljs-built_in, .hljs-title.class_.inherited__ { color: var(--vscode-symbolIcon-classForeground, #ee9d28); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-params, .hljs-template-variable { color: var(--vscode-symbolIcon-variableForeground, #75beff); }
+.hljs-meta, .hljs-annotation, .hljs-tag { color: var(--c-orange); }
+.hljs-comment, .hljs-quote { color: var(--vscode-descriptionForeground); font-style: italic; }
 button { font: inherit; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; padding: 4px 11px; cursor: pointer; }
 button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 button.primary, .seg button.sel { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
@@ -299,9 +363,15 @@ a { color: var(--vscode-textLink-foreground); }
 .seg button:first-child { border-radius: 3px 0 0 3px; }
 .seg button:last-child { border-radius: 0 3px 3px 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.chip { border-radius: 12px; padding: 2px 10px; font-size: .92em; }
-.pill { font-size: .85em; padding: 1px 8px; border-radius: 9px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); text-transform: none; }
+.chip { border-radius: 12px; padding: 2px 10px; font-size: .92em; color: var(--vscode-foreground); background: color-mix(in srgb, var(--c-blue) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c-blue) 45%, transparent); }
+.chip:hover { background: color-mix(in srgb, var(--c-blue) 26%, transparent); }
+.pill { font-size: .85em; font-weight: 600; padding: 1px 8px; border-radius: 9px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); text-transform: none; }
+.pill.new { color: var(--c-blue); background: color-mix(in srgb, var(--c-blue) 16%, transparent); }
+.pill.learning { color: var(--c-yellow); background: color-mix(in srgb, var(--c-yellow) 16%, transparent); }
+.pill.known { color: var(--c-green); background: color-mix(in srgb, var(--c-green) 16%, transparent); }
 .box { border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, #8884)); border-radius: 4px; padding: 4px 14px 12px; margin-top: 18px; }
+.box[class*="tint-"] { background: color-mix(in srgb, var(--accent) 8%, transparent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); border-left: 3px solid var(--accent); }
+.tint-purple td strong { color: var(--c-purple); }
 table { border-collapse: collapse; width: 100%; }
 td { padding: 4px 8px 4px 0; vertical-align: top; }
 .trust { font-size: .9em; margin: 4px 0; }
