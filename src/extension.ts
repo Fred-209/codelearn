@@ -7,12 +7,14 @@ import { relPath } from './learn/files';
 import { TeachingHover } from './learn/hover';
 import { Lessons } from './learn/lessons';
 import { offerInterviewOnce, runInterview } from './profile/interview';
+import { collectFiles } from './scan/collect';
+import { changedFiles } from './scan/digest';
 import { Scanner } from './scan/scanner';
 import { reportError, Services } from './services';
 import { Store } from './store/store';
 import { UsageLog } from './store/usage';
 import { usageReport } from './store/usageReport';
-import type { ConceptStatus, Walkthrough } from './store/types';
+import type { ConceptStatus, RepoMap, Walkthrough } from './store/types';
 import { MapTree } from './ui/mapTree';
 import { LearnPanel } from './ui/panel';
 import { WalkthroughController } from './walkthrough/controller';
@@ -23,6 +25,8 @@ export interface CodelearnTestApi {
   services: Services;
   panel: LearnPanel;
   walks: WalkthroughController;
+  tree: MapTree;
+  checkFreshness: () => Promise<void>;
 }
 
 export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
@@ -195,12 +199,48 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
     }),
   );
 
+  // Compare the files on disk with the map (no AI), so a branch switch, a pull or a worktree
+  // shows up as "N files changed" in the sidebar. Rechecked when the map changes and when
+  // the window regains focus, at most every few minutes.
+  let lastCheck = 0;
+  const checkFreshness = async () => {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    const map = await store.getMap();
+    if (!folder || !map) return tree.setChanged(new Set());
+    lastCheck = Date.now();
+    const cts = new vscode.CancellationTokenSource();
+    try {
+      const { hashes } = await collectFiles(folder, cts.token);
+      tree.setChanged(changedFiles(map.fileHashes, hashes));
+    } catch (e) {
+      log.warn(`Checking for changed files failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      cts.dispose();
+    }
+  };
+  const freshnessTimer = setTimeout(() => void checkFreshness(), context.extensionMode === vscode.ExtensionMode.Test ? 0 : 4000);
+  context.subscriptions.push(
+    { dispose: () => clearTimeout(freshnessTimer) },
+    vscode.window.onDidChangeWindowState((w) => {
+      if (w.focused && Date.now() - lastCheck > 5 * 60_000) void checkFreshness();
+    }),
+  );
+
   void store.getMap().then((map) => {
     void vscode.commands.executeCommand('setContext', 'codelearn.hasMap', !!map);
   });
-  store.onDidChange(() => void store.getMap().then((m) => vscode.commands.executeCommand('setContext', 'codelearn.hasMap', !!m)));
+  let checkedMap: RepoMap | undefined;
+  store.onDidChange(async () => {
+    const m = await store.getMap();
+    void vscode.commands.executeCommand('setContext', 'codelearn.hasMap', !!m);
+    // Profile and status changes fire this too; only a new map needs a recheck.
+    if (m !== checkedMap) {
+      checkedMap = m;
+      void checkFreshness();
+    }
+  });
   if (context.extensionMode !== vscode.ExtensionMode.Test) void offerInterviewOnce(context, store);
-  return { services, panel, walks };
+  return { services, panel, walks, tree, checkFreshness };
 }
 
 export function deactivate(): void {}

@@ -201,6 +201,16 @@ describe('codelearn in VS Code', () => {
     assert.strictEqual(api.walks.current, undefined);
   });
 
+  it('notices files that changed since the map was built, without the AI', async () => {
+    // The seeded map has no file hashes, so every file in the fixture counts as changed.
+    await api.checkFreshness();
+    assert.ok(api.tree.changedCount > 0, 'expected changed files');
+    const roots = await api.tree.getChildren();
+    const first = api.tree.getTreeItem(roots[0]);
+    assert.match(String(first.label), /changed: update the map/);
+    assert.strictEqual(first.command?.command, 'codelearn.updateMap');
+  });
+
   it('opens map items such as flows in the panel', async () => {
     await vscode.commands.executeCommand('codelearn.openMapItem', 'flow', 'get-active');
     await until(() => tabLabels().includes('codelearn map'), 'map tab');

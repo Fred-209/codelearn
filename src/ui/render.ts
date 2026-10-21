@@ -265,29 +265,29 @@ function renderMapItem(v: Extract<View, { kind: 'mapItem' }>): string {
   if (v.type === 'overview') {
     return `<header><div class="eyebrow">Overview</div><h1>${esc(m.repoName)}</h1></header>
       <section class="body"><p>${esc(m.overview)}</p></section>
-      <section><h2>Areas</h2><ul>${m.areas.map((a) => `<li><button class="link" data-action="map" data-type="area" data-id="${esc(a.id)}">${esc(a.name)}</button>: ${esc(a.summary)}</li>`).join('')}</ul></section>
-      <section><h2>Main flows</h2><ul>${m.flows.map((f) => `<li><button class="link" data-action="map" data-type="flow" data-id="${esc(f.id)}">${esc(f.name)}</button>: ${esc(f.summary)}</li>`).join('')}</ul></section>
+      <section class="box tint-blue"><h2>Areas</h2><ul>${m.areas.map((a) => `<li><button class="link" data-action="map" data-type="area" data-id="${esc(a.id)}">${esc(a.name)}</button>: ${esc(a.summary)}</li>`).join('')}</ul></section>
+      <section class="box tint-purple"><h2>Main flows</h2><ul>${m.flows.map((f) => `<li><button class="link" data-action="map" data-type="flow" data-id="${esc(f.id)}">${esc(f.name)}</button>: ${esc(f.summary)}</li>`).join('')}</ul></section>
       <p class="muted">Map built ${esc(m.generatedAt.slice(0, 10))} by ${esc(m.model)}.</p>`;
   }
   if (v.type === 'area') {
     const a = m.areas.find((x) => x.id === v.id);
     if (!a) return notFound();
     return `<header><div class="eyebrow">Area</div><h1>${esc(a.name)}</h1></header><section class="body"><p>${esc(a.summary)}</p></section>
-      <section><h2>Where it lives</h2><ul>${a.paths.map((p) => `<li><code>${esc(p)}</code></li>`).join('')}</ul></section>`;
+      <section class="box tint-blue"><h2>Where it lives</h2><ul>${a.paths.map((p) => `<li><code>${esc(p)}</code></li>`).join('')}</ul></section>`;
   }
   if (v.type === 'flow') {
     const f = m.flows.find((x) => x.id === v.id);
     if (!f) return notFound();
     return `<header><div class="eyebrow">Flow</div><h1>${esc(f.name)}</h1></header><section class="body"><p>${esc(f.summary)}</p></section>
       <div class="toolbar"><button class="primary" data-action="walk-flow" data-id="${esc(f.id)}">Walk me through this flow</button></div>
-      <section><h2>Files, in order</h2><ol>${f.files.map((p) => `<li><button class="link" data-action="open" data-file="${esc(p)}" data-line="1">${esc(p)}</button></li>`).join('')}</ol></section>
-      ${f.entry ? `<section><h2>Starts at</h2>${renderCitations([f.entry])}</section>` : ''}`;
+      <section class="box tint-purple"><h2>Files, in order</h2><ol>${f.files.map((p) => `<li><button class="link" data-action="open" data-file="${esc(p)}" data-line="1">${esc(p)}</button></li>`).join('')}</ol></section>
+      ${f.entry ? `<section class="box tint-green"><h2>Starts at</h2>${renderCitations([f.entry])}</section>` : ''}`;
   }
   if (v.type === 'term') {
     const t = m.glossary.find((x) => x.term === v.id);
     if (!t) return notFound();
     return `<header><div class="eyebrow">Business term</div><h1>${esc(t.term)}</h1></header><section class="body"><p>${esc(t.meaning)}</p></section>
-      <section><h2>In the code</h2>${renderCitations(t.citations)}</section>`;
+      <section class="box tint-green"><h2>In the code</h2>${renderCitations(t.citations)}</section>`;
   }
   const c = m.conventions[Number(v.id)];
   if (!c) return notFound();
@@ -297,8 +297,8 @@ function renderMapItem(v: Extract<View, { kind: 'mapItem' }>): string {
     unchecked: "Not checked: the code codelearn read didn't show it either way.",
   }[c.status];
   return `<header><div class="eyebrow">Convention · from ${esc(c.source)}</div><h1>${esc(c.rule)}</h1></header>
-    <div class="callout ${c.status === 'contradicted' ? 'warn' : ''}">${statusText}${c.note ? ` ${esc(c.note)}` : ''}</div>
-    <section><h2>Evidence</h2>${renderCitations(c.evidence)}</section>`;
+    <div class="callout ${c.status === 'contradicted' ? 'warn' : c.status === 'confirmed' ? 'ok' : ''}">${statusText}${c.note ? ` ${esc(c.note)}` : ''}</div>
+    <section class="box tint-green"><h2>Evidence</h2>${renderCitations(c.evidence)}</section>`;
 }
 
 function notFound(): string {
@@ -380,7 +380,9 @@ td { padding: 4px 8px 4px 0; vertical-align: top; }
 .cites { list-style: none; padding: 0; margin: 4px 0; }
 .cites li { margin: 3px 0; }
 .callout { border-left: 3px solid var(--vscode-focusBorder); padding: 8px 12px; background: var(--vscode-textBlockQuote-background); margin: 12px 0; }
-.callout.warn { border-left-color: var(--vscode-editorWarning-foreground); }
+.callout.warn { border-left-color: var(--c-orange); background: color-mix(in srgb, var(--c-orange) 10%, transparent); }
+.callout.ok { border-left-color: var(--c-green); background: color-mix(in srgb, var(--c-green) 10%, transparent); }
+.body > p:first-child { font-size: 1.05em; }
 .options { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .opt.right { outline: 2px solid var(--vscode-testing-iconPassed, #3fa266); }
 .opt.wrong { outline: 2px solid var(--vscode-errorForeground); }

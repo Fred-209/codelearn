@@ -199,6 +199,23 @@ export function mapSkeleton(v: unknown): MapSkeleton {
   };
 }
 
+/** What "Update map" found in changed files. Throws only if the reply isn't an object at all. */
+export interface MapAdditions {
+  concepts: Concept[];
+  glossary: GlossaryTerm[];
+  flows: Flow[];
+}
+
+export function mapAdditions(v: unknown): MapAdditions {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('The AI reply was not a list of map additions.');
+  const o = obj(v);
+  return {
+    concepts: uniqueById(list(o.concepts, conceptSkeleton, 30)),
+    glossary: list(o.glossary, glossaryTerm, 30),
+    flows: uniqueById(list(o.flows, flow, 6)),
+  };
+}
+
 export interface ConceptDetail {
   id: string;
   hover: string;

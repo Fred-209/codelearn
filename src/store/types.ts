@@ -1,7 +1,8 @@
 // Shapes of everything codelearn saves. All of it lives in VS Code's private
 // extension storage on this machine; nothing is written into the repo.
 
-export const MAP_VERSION = 1;
+/** Bump when RepoMap changes shape, and add a step to migrateMap so saved maps keep working. */
+export const MAP_VERSION = 2;
 
 /** A pointer into the code backing a claim. `quote` lets us re-find the line if it moved. */
 export interface Citation {
@@ -81,6 +82,8 @@ export interface RepoMap {
   conventions: Convention[];
   /** content hash per file read during the scan, for incremental updates */
   fileHashes: Record<string, string>;
+  /** The branch and commit the map was last built or updated from (v2). */
+  builtFrom?: { branch?: string; commit?: string };
 }
 
 export type Depth = 'refresher' | 'standard' | 'scratch';

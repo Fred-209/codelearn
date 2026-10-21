@@ -46,11 +46,17 @@ Most usage happens once per repo, during the first scan: one big request plus ab
 - Hovers read saved text and make no requests.
 - Lessons, explanations and walkthroughs are written the first time you open them, then saved.
 - Lessons on general concepts (a language feature, a library) are shared across all your repos.
-- **Update map** re-describes only concepts touched by files that changed.
+- **Update map** works from the files that changed since the map was built. It finds new concepts, business terms and flows in them (one request), drops ones whose code is gone, and re-describes only the concepts the changes touch. When most of the repo changed, it suggests a full rebuild instead.
+
+### Branches, worktrees and updates
+
+- One map per repository, not per folder. Every git worktree and clone of a repo shares it, along with its lessons and walkthroughs. A repo is recognised by its origin URL, or by its shared `.git` folder when it has no remote.
+- When VS Code opens, codelearn compares the files on disk with the map. This makes no AI requests. If anything differs (after a pull, a branch switch, or in a worktree), the sidebar shows "N files changed: update the map", and the overview says which branch and commit the map came from. Updating is always your call.
+- Saved maps and lessons are upgraded when you install a newer codelearn, never thrown away, so an extension update doesn't mean a rebuild.
 
 ## Privacy
 
-- Everything codelearn generates is saved in VS Code's private storage on your machine. Nothing is written into the repo.
+- Everything codelearn generates is saved in VS Code's private storage on your machine (`<VS Code user folder>/globalStorage/fred-209.codelearn/`, under `repos/` per repository and `library/` for shared lessons). Nothing is written into the repo.
 - The extension sends no telemetry and makes no network calls of its own. AI requests go through VS Code's Language Model API (Copilot) or the `claude` command line (Claude Code).
 - **codelearn: Delete saved lessons for this repo** removes everything saved for the current repo.
 

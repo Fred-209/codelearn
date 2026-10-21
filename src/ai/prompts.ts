@@ -74,6 +74,37 @@ ${JSON_ONLY}`,
   };
 }
 
+/** For "Update map": find what's new in the files that changed since the map was built. */
+export function mapUpdatePrompt(digest: string, map: Pick<RepoMap, 'overview' | 'concepts' | 'glossary' | 'flows'>, profile: LearnerProfile | undefined) {
+  const known = (items: string[]) => (items.length ? items.join('; ') : '(none)');
+  return {
+    system: `${TEACHER}\n\n${learnerText(profile)}`,
+    user: `Repository overview: ${map.overview}
+
+The repository already has a map. These files changed or were added since it was built:
+
+${digest}
+
+---
+
+The map already covers:
+- Concepts: ${known(map.concepts.map((c) => `${c.id} (${c.name})`))}
+- Business terms: ${known(map.glossary.map((g) => g.term))}
+- Flows: ${known(map.flows.map((f) => `${f.id} (${f.name})`))}
+
+List ONLY what these files introduce that the map does not cover yet. Don't repeat anything already covered, even under a different name. Empty lists are a perfectly good answer.
+
+Produce JSON with this schema:
+{
+  "concepts": [{ "id": string, "name": string, "kind": "language" | "library" | "pattern" | "architecture" | "domain" | "tooling", "summary": string, "match": string[], "prereqs": string[], "docsSite": string, "searchQuery": string }],
+  "glossary": [{ "term": string, "meaning": string, "citations": [${CITATION_SCHEMA}] }],
+  "flows": [{ "id": string, "name": string, "summary": string, "files": string[], "entry": ${CITATION_SCHEMA} }]
+}
+Use the same field meanings as a full map: "match" lists identifiers exactly as written in code, "files" are in execution order.
+${JSON_ONLY}`,
+  };
+}
+
 export function conceptDetailsPrompt(
   concepts: { concept: Concept; occurrences: Occurrence[] }[],
   overview: string,

@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { AIUnavailableError, completeJson } from '../ai/provider';
 import { NO_PROVIDER_HELP } from '../ai/providerChoice';
-import { conceptDetails, ConceptDetail, mapSkeleton, MapSkeleton } from '../ai/normalize';
-import { conceptDetailsPrompt, mapPrompt } from '../ai/prompts';
+import { conceptDetails, ConceptDetail, MapAdditions, mapAdditions, mapSkeleton, MapSkeleton } from '../ai/normalize';
+import { conceptDetailsPrompt, mapPrompt, mapUpdatePrompt } from '../ai/prompts';
 import { verifyAll, verifyCitation, FileLookup } from '../learn/anchor';
 import { readText } from '../learn/files';
 import { matchTokens } from '../learn/matcher';
@@ -11,6 +11,7 @@ import type { Concept, RepoMap } from '../store/types';
 import { MAP_VERSION } from '../store/types';
 import { addOutlines, collectFiles } from './collect';
 import { buildDigest, changedFiles, estimateRequests, findOccurrences, RepoFile } from './digest';
+import { mergeMapUpdate } from './mapUpdate';
 
 const BATCH = 8;
 const EXPECTED_CONCEPTS = 40;
@@ -91,14 +92,16 @@ export class Scanner {
           verifySkeleton(skeleton, lookup);
 
           const details = await this.describeConcepts(skeleton.concepts, files, skeleton.overview, previous, hashes, progress, token);
+          const git = await this.s.store.gitState();
           const map: RepoMap = {
             version: MAP_VERSION,
-            repoName: folder.name,
+            repoName: git?.name ?? folder.name,
             generatedAt: new Date().toISOString(),
             model,
             ...skeleton,
             concepts: applyDetails(skeleton.concepts, details, lookup),
             fileHashes: hashes,
+            builtFrom: { branch: git?.branch, commit: git?.commit },
           };
           await this.s.store.saveMap(map);
           this.s.log.info(`Map built: ${map.concepts.length} concepts, ${map.flows.length} flows, ${map.glossary.length} terms.`);
@@ -112,7 +115,11 @@ export class Scanner {
     }
   }
 
-  /** Re-describes only concepts touched by changed files and re-checks every citation. */
+  /**
+   * Brings the map up to date with the files that changed since it was built: finds new
+   * concepts, terms and flows in them (one request), drops ones whose code is gone, and
+   * re-describes concepts the changes touch. Re-checks every citation.
+   */
   private async update(
     previous: RepoMap,
     files: RepoFile[],
@@ -146,35 +153,67 @@ export class Scanner {
         c.citations.some((ct) => changed.has(ct.file)) ||
         findOccurrences(changedText, c.match.flatMap(matchTokens), 1).length > 0,
     );
-    const requests = Math.ceil(touched.length / BATCH);
-    if (requests > 0) {
-      const ok = await vscode.window.showInformationMessage(
-        `${changed.size} files changed. Update ${touched.length} concepts with ${standardName} (about ${requests} AI requests)?`,
-        'Update',
-      );
-      if (ok !== 'Update') return;
+    const requests = (changedText.length ? 1 : 0) + Math.ceil(touched.length / BATCH);
+    const ok = await vscode.window.showInformationMessage(
+      `${changed.size} files changed since the map was built.`,
+      {
+        modal: true,
+        detail:
+          `codelearn will look for new concepts, terms and flows in the changed files, and refresh ${touched.length} existing concepts, ` +
+          `using ${standardName}: about ${requests} AI requests, plus one per 8 new concepts it finds.`,
+      },
+      'Update map',
+    );
+    if (ok !== 'Update map' || token.isCancellationRequested) return;
+
+    let additions: MapAdditions = { concepts: [], glossary: [], flows: [] };
+    if (changedText.length) {
+      progress.report({ message: 'Looking for new concepts in the changed files…' });
+      const digest = buildDigest(changedText, { repoName: previous.repoName, budget: 80_000 });
+      try {
+        ({ value: additions } = await completeJson(
+          this.s.ai,
+          { slot: 'standard', ...mapUpdatePrompt(digest.text, previous, this.s.store.getProfile()), justification: JUSTIFICATION, purpose: 'update map' },
+          mapAdditions,
+          token,
+        ));
+      } catch (e) {
+        // Still refresh what's there; new things can be found next time.
+        this.s.log.warn(`Looking for new concepts failed: ${e instanceof Error ? e.message : e}`);
+      }
     }
 
-    const details = await this.describeConcepts(touched, files, previous.overview, undefined, hashes, progress, token);
+    const merged = mergeMapUpdate(previous, additions, files);
+    const refresh = [...touched.filter((c) => merged.map.concepts.includes(c)), ...merged.added.concepts];
+    const details = await this.describeConcepts(refresh, files, previous.overview, undefined, hashes, progress, token);
     const skeleton: MapSkeleton = {
       overview: previous.overview,
       areas: previous.areas,
-      flows: previous.flows,
-      concepts: previous.concepts,
-      glossary: previous.glossary,
+      flows: merged.map.flows,
+      concepts: merged.map.concepts,
+      glossary: merged.map.glossary,
       conventions: previous.conventions,
     };
     verifySkeleton(skeleton, lookup);
+    const git = await this.s.store.gitState();
     const map: RepoMap = {
       ...previous,
       ...skeleton,
-      concepts: applyDetails(previous.concepts, details, lookup),
+      concepts: applyDetails(skeleton.concepts, details, lookup),
       fileHashes: hashes,
       generatedAt: new Date().toISOString(),
+      builtFrom: { branch: git?.branch, commit: git?.commit },
     };
     await this.s.store.saveMap(map);
+
+    const news = [
+      merged.added.concepts.length && `${merged.added.concepts.length} new concepts`,
+      merged.added.terms && `${merged.added.terms} new terms`,
+      merged.added.flows && `${merged.added.flows} new flows`,
+      merged.removed.concepts.length && `${merged.removed.concepts.length} concepts removed`,
+    ].filter(Boolean);
     vscode.window.showInformationMessage(
-      `codelearn updated ${touched.length} concepts from ${changed.size} changed files. New concepts are only found by "Build map".`,
+      `codelearn updated the map from ${changed.size} changed files: ${touched.length} concepts refreshed${news.length ? `, ${news.join(', ')}` : ''}.`,
     );
   }
 

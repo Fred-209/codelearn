@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "repoName": "payments-api",
+  "generatedAt": "2026-10-21T02:00:00.000Z",
+  "model": "Claude Opus 5.5",
+  "overview": "A payments API built on ASP.NET with MediatR handlers and Dapper.",
+  "areas": [{ "id": "handlers", "name": "Handlers", "summary": "Request handlers", "paths": ["src/Handlers"] }],
+  "flows": [{ "id": "get-active", "name": "Getting active payments", "summary": "Loads and filters payments.", "files": ["src/GetActivePaymentsHandler.cs"] }],
+  "concepts": [
+    {
+      "id": "linq",
+      "name": "LINQ",
+      "kind": "library",
+      "summary": "Query methods for collections.",
+      "hover": "LINQ filters and transforms collections.",
+      "match": ["Where", "Select"],
+      "prereqs": ["Lambdas"],
+      "usage": "Handlers filter repository results.",
+      "citations": [{ "file": "src/GetActivePaymentsHandler.cs", "line": 15, "quote": ".Where(p => p.Amount > 0)", "verified": true }],
+      "docsSite": "learn.microsoft.com",
+      "searchQuery": "C# LINQ"
+    }
+  ],
+  "glossary": [{ "term": "Settlement batch", "meaning": "A group of payments settled together.", "citations": [] }],
+  "conventions": [{ "rule": "Handlers filter after loading", "source": "AGENTS.md", "status": "confirmed", "evidence": [] }],
+  "fileHashes": { "src/GetActivePaymentsHandler.cs": "0123456789abcdef" }
+}

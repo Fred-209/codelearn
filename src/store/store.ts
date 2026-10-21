@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
+import * as fs from 'fs';
 import { slug } from '../ai/normalize';
+import { RepoIdentity, resolveRepoIdentity } from './gitIdentity';
+import { migrateExplanation, migrateLesson, migrateMap, migrateWalkthrough } from './migrate';
 import type { ConceptStatus, Explanation, LearnerProfile, Lesson, RepoMap, Walkthrough } from './types';
-import { MAP_VERSION } from './types';
 
 export function hash(text: string): string {
   return createHash('sha1').update(text).digest('hex').slice(0, 16);
@@ -28,6 +30,8 @@ export class Store {
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChange = this.onDidChangeEmitter.event;
   private cachedMap: RepoMap | undefined | null = null; // null = not loaded yet
+  private dirPromise: Promise<vscode.Uri> | undefined;
+  private identityName: string | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -39,17 +43,46 @@ export class Store {
   }
 
   get repoName(): string {
-    return this.workspaceFolder?.name ?? 'workspace';
+    return this.identityName ?? this.workspaceFolder?.name ?? 'workspace';
   }
 
   get root(): vscode.Uri | undefined {
     return this.workspaceFolder?.uri;
   }
 
-  private get repoDir(): vscode.Uri {
-    if (!this.workspaceFolder) throw new Error('Open a folder to use codelearn.');
-    const key = `${slug(this.workspaceFolder.name)}-${hash(this.workspaceFolder.uri.toString())}`;
-    return vscode.Uri.joinPath(this.context.globalStorageUri, 'repos', key);
+  /** Which repo this is, and its current branch and commit. Read fresh each time. */
+  async gitState(): Promise<RepoIdentity | undefined> {
+    const folder = this.workspaceFolder;
+    if (!folder) return undefined;
+    if (folder.uri.scheme !== 'file') return { key: `folder:${folder.uri.toString()}`, name: folder.name };
+    return resolveRepoIdentity(folder.uri.fsPath, readTextFile, folder.name);
+  }
+
+  /**
+   * One folder per repository, not per checkout: every git worktree and clone of the same
+   * repo (same origin URL, or the same .git folder) shares its map, lessons and walkthroughs.
+   */
+  private repoDir(): Promise<vscode.Uri> {
+    return (this.dirPromise ??= this.resolveRepoDir());
+  }
+
+  private async resolveRepoDir(): Promise<vscode.Uri> {
+    const folder = this.workspaceFolder;
+    if (!folder) throw new Error('Open a folder to use codelearn.');
+    const id = (await this.gitState())!;
+    this.identityName = id.name;
+    const repos = vscode.Uri.joinPath(this.context.globalStorageUri, 'repos');
+    const dir = vscode.Uri.joinPath(repos, `${slug(id.name)}-${hash(id.key)}`);
+    // Before 0.1.x settled, data was keyed by folder path. Move it over once.
+    const legacy = vscode.Uri.joinPath(repos, `${slug(folder.name)}-${hash(folder.uri.toString())}`);
+    if (legacy.toString() !== dir.toString() && (await exists(legacy)) && !(await exists(dir))) {
+      try {
+        await vscode.workspace.fs.rename(legacy, dir);
+      } catch {
+        return legacy;
+      }
+    }
+    return dir;
   }
 
   private get libraryDir(): vscode.Uri {
@@ -61,51 +94,51 @@ export class Store {
   async getMap(): Promise<RepoMap | undefined> {
     if (this.cachedMap !== null) return this.cachedMap;
     if (!this.workspaceFolder) return (this.cachedMap = undefined);
-    const map = await this.readJson<RepoMap>(vscode.Uri.joinPath(this.repoDir, 'map.json'));
-    this.cachedMap = map && map.version === MAP_VERSION ? map : undefined;
+    // Older maps are upgraded, never discarded: a new codelearn release shouldn't cost a rebuild.
+    this.cachedMap = migrateMap(await this.readJson(vscode.Uri.joinPath(await this.repoDir(), 'map.json')));
     return this.cachedMap;
   }
 
   async saveMap(map: RepoMap): Promise<void> {
-    await this.writeJson(vscode.Uri.joinPath(this.repoDir, 'map.json'), map);
+    await this.writeJson(vscode.Uri.joinPath(await this.repoDir(), 'map.json'), map);
     this.cachedMap = map;
     this.onDidChangeEmitter.fire();
   }
 
   // ---- lessons ----
 
-  private lessonUri(conceptName: string, depth: string, general: boolean): vscode.Uri {
+  private async lessonUri(conceptName: string, depth: string, general: boolean): Promise<vscode.Uri> {
     return general
       ? vscode.Uri.joinPath(this.libraryDir, `${slug(conceptName)}.${depth}.${this.profileHash()}.json`)
-      : vscode.Uri.joinPath(this.repoDir, 'lessons', `${slug(conceptName)}.${depth}.json`);
+      : vscode.Uri.joinPath(await this.repoDir(), 'lessons', `${slug(conceptName)}.${depth}.json`);
   }
 
-  getLesson(conceptName: string, depth: string, general: boolean): Promise<Lesson | undefined> {
-    return this.readJson<Lesson>(this.lessonUri(conceptName, depth, general));
+  async getLesson(conceptName: string, depth: string, general: boolean): Promise<Lesson | undefined> {
+    return migrateLesson(await this.readJson(await this.lessonUri(conceptName, depth, general)));
   }
 
-  saveLesson(lesson: Lesson, general: boolean): Promise<void> {
-    return this.writeJson(this.lessonUri(lesson.conceptName, lesson.depth, general), lesson);
+  async saveLesson(lesson: Lesson, general: boolean): Promise<void> {
+    return this.writeJson(await this.lessonUri(lesson.conceptName, lesson.depth, general), lesson);
   }
 
   // ---- explanations (keyed by a hash of what was explained) ----
 
-  getExplanation(key: string): Promise<Explanation | undefined> {
-    return this.readJson<Explanation>(vscode.Uri.joinPath(this.repoDir, 'explanations', `${hash(key)}.json`));
+  async getExplanation(key: string): Promise<Explanation | undefined> {
+    return migrateExplanation(await this.readJson(vscode.Uri.joinPath(await this.repoDir(), 'explanations', `${hash(key)}.json`)));
   }
 
-  saveExplanation(key: string, e: Explanation): Promise<void> {
-    return this.writeJson(vscode.Uri.joinPath(this.repoDir, 'explanations', `${hash(key)}.json`), e);
+  async saveExplanation(key: string, e: Explanation): Promise<void> {
+    return this.writeJson(vscode.Uri.joinPath(await this.repoDir(), 'explanations', `${hash(key)}.json`), e);
   }
 
   // ---- walkthroughs ----
 
-  getWalkthrough(id: string): Promise<Walkthrough | undefined> {
-    return this.readJson(vscode.Uri.joinPath(this.repoDir, 'walkthroughs', `${slug(id)}.json`));
+  async getWalkthrough(id: string): Promise<Walkthrough | undefined> {
+    return migrateWalkthrough(await this.readJson(vscode.Uri.joinPath(await this.repoDir(), 'walkthroughs', `${slug(id)}.json`)));
   }
 
-  saveWalkthrough(w: Walkthrough): Promise<void> {
-    return this.writeJson(vscode.Uri.joinPath(this.repoDir, 'walkthroughs', `${slug(w.id)}.json`), w);
+  async saveWalkthrough(w: Walkthrough): Promise<void> {
+    return this.writeJson(vscode.Uri.joinPath(await this.repoDir(), 'walkthroughs', `${slug(w.id)}.json`), w);
   }
 
   // ---- learner ----
@@ -152,7 +185,7 @@ export class Store {
 
   async clearRepo(): Promise<void> {
     try {
-      await vscode.workspace.fs.delete(this.repoDir, { recursive: true, useTrash: false });
+      await vscode.workspace.fs.delete(await this.repoDir(), { recursive: true, useTrash: false });
     } catch {
       // nothing saved yet
     }
@@ -172,5 +205,23 @@ export class Store {
   private async writeJson(uri: vscode.Uri, value: unknown): Promise<void> {
     await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, '..'));
     await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(value, null, 2), 'utf8'));
+  }
+}
+
+async function exists(uri: vscode.Uri): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** For reading git's own files (.git, HEAD, config). Undefined for missing files and folders. */
+async function readTextFile(file: string): Promise<string | undefined> {
+  try {
+    return await fs.promises.readFile(file, 'utf8');
+  } catch {
+    return undefined;
   }
 }
