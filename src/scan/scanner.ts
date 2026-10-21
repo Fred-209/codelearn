@@ -84,7 +84,7 @@ export class Scanner {
           progress.report({ message: `Mapping the repo with ${deep.name}… (this can take a few minutes)` });
           const { value: skeleton, model } = await completeJson(
             this.s.ai,
-            { slot: 'deep', ...mapPrompt(digest.text, this.s.store.getProfile()), justification: JUSTIFICATION },
+            { slot: 'deep', ...mapPrompt(digest.text, this.s.store.getProfile()), justification: JUSTIFICATION, purpose: 'build map' },
             mapSkeleton,
             token,
           );
@@ -198,6 +198,7 @@ export class Scanner {
         slot: 'deep',
         ...conceptDetailsPrompt([{ concept, occurrences }], map.overview, this.s.store.getProfile(), feedback),
         justification: JUSTIFICATION,
+        purpose: `rewrite: ${concept.name}`,
       },
       conceptDetails,
       token,
@@ -237,7 +238,7 @@ export class Scanner {
       try {
         const { value } = await completeJson(
           this.s.ai,
-          { slot: 'standard', ...conceptDetailsPrompt(input, overview, this.s.store.getProfile()), justification: JUSTIFICATION },
+          { slot: 'standard', ...conceptDetailsPrompt(input, overview, this.s.store.getProfile()), justification: JUSTIFICATION, purpose: 'describe concepts' },
           conceptDetails,
           token,
         );

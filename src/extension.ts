@@ -10,6 +10,8 @@ import { offerInterviewOnce, runInterview } from './profile/interview';
 import { Scanner } from './scan/scanner';
 import { reportError, Services } from './services';
 import { Store } from './store/store';
+import { UsageLog } from './store/usage';
+import { usageReport } from './store/usageReport';
 import type { ConceptStatus, Walkthrough } from './store/types';
 import { MapTree } from './ui/mapTree';
 import { LearnPanel } from './ui/panel';
@@ -26,7 +28,8 @@ export interface CodelearnTestApi {
 export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   const log = vscode.window.createOutputChannel('codelearn', { log: true });
   const store = new Store(context, vscode.workspace.workspaceFolders?.[0]);
-  const ai = new ProviderRouter(context);
+  const usage = new UsageLog(context.globalStorageUri);
+  const ai = new ProviderRouter(context, (entry) => void usage.record({ ...entry, repo: store.repoName }));
   const services: Services = { context, store, ai, log };
 
   const lessons = new Lessons(services);
@@ -70,8 +73,18 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   const tree = new MapTree(store);
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   status.text = '$(book) codelearn';
-  status.tooltip = "What's happening here? (Ctrl+Alt+/)";
   status.command = 'codelearn.whatsHappening';
+  const updateStatus = async () => {
+    const since = new Date().setHours(0, 0, 0, 0);
+    const today = (await usage.all()).filter((e) => Date.parse(e.at) >= since).length;
+    const tip = new vscode.MarkdownString(
+      `What's happening here? (Ctrl+Alt+/)\n\nAI requests today: ${today} · [Show AI usage](command:codelearn.showUsage)`,
+    );
+    tip.isTrusted = { enabledCommands: ['codelearn.showUsage'] };
+    status.tooltip = tip;
+  };
+  void updateStatus();
+  usage.onDidChange(() => void updateStatus());
   status.show();
 
   const editorTarget = async (): Promise<ExplainTarget | undefined> => {
@@ -94,6 +107,7 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
 
   context.subscriptions.push(
     log,
+    usage,
     panel,
     walks,
     status,
@@ -104,6 +118,7 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
     cmd('codelearn.updateMap', () => scanner.build('update')),
     cmd('codelearn.setupProfile', () => runInterview(store)),
     cmd('codelearn.chooseModels', () => chooseModels(ai)),
+    cmd('codelearn.showUsage', async () => panel.showUsage(usageReport(await usage.all(), new Date()))),
 
     cmd('codelearn.whatsHappening', async () => {
       const t = await editorTarget();

@@ -9,11 +9,23 @@ export interface AIRequest {
   user: string;
   /** Shown by VS Code when it asks the user to allow codelearn to use a model. */
   justification: string;
+  /** What the request is for, shown in the usage tally, e.g. "lesson: LINQ". */
+  purpose: string;
+}
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  /** false when the provider doesn't report tokens and they were estimated. */
+  exact: boolean;
+  /** What the request would cost at API list prices, when the provider reports it. */
+  costUSD?: number;
 }
 
 export interface AIResult {
   text: string;
   model: string;
+  usage?: TokenUsage;
 }
 
 /**

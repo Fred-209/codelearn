@@ -63,6 +63,7 @@ export class WalkthroughBuilder {
         slot,
         ...walkthroughPrompt(goal, sources.map((s) => ({ file: s.file, code: s.code })), map, this.s.store.getProfile()),
         justification: 'codelearn walks you through the code you are reading.',
+        purpose: `walkthrough: ${goal}`,
       },
       (v) => {
         const o = obj(v);

@@ -38,12 +38,22 @@ export class VsCodeLmProvider implements AIProvider {
       const response = await model.sendRequest(messages, { justification: req.justification }, token ?? cts!.token);
       let text = '';
       for await (const chunk of response.text) text += chunk;
-      return { text, model: model.name };
+      return { text, model: model.name, usage: await estimateUsage(model, messages[0], text) };
     } catch (e) {
       throw friendlyError(e);
     } finally {
       cts?.dispose();
     }
+  }
+}
+
+/** Copilot doesn't report tokens, so count them with the model's own tokenizer. */
+async function estimateUsage(model: vscode.LanguageModelChat, prompt: vscode.LanguageModelChatMessage, reply: string) {
+  try {
+    const [input, output] = await Promise.all([model.countTokens(prompt), model.countTokens(reply)]);
+    return { input, output, exact: false };
+  } catch {
+    return undefined;
   }
 }
 

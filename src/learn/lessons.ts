@@ -57,7 +57,7 @@ export class Lessons {
     );
     const { value, model } = await completeJson(
       this.s.ai,
-      { slot: feedback ? 'deep' : 'standard', ...prompt, justification: 'codelearn writes lessons about the code you are reading.' },
+      { slot: feedback ? 'deep' : 'standard', ...prompt, justification: 'codelearn writes lessons about the code you are reading.', purpose: `${feedback ? 'rewrite lesson' : 'lesson'}: ${concept.name} (${depth})` },
       (v) => {
         const o = obj(v);
         const body = str(o.body);

@@ -49,7 +49,8 @@ export type View =
       names: Record<string, string>;
     }
   | { kind: 'walkthrough'; walkthrough: Walkthrough; index: number; names: Record<string, string> }
-  | { kind: 'mapItem'; map: RepoMap; type: 'overview' | 'area' | 'flow' | 'term' | 'convention'; id: string };
+  | { kind: 'mapItem'; map: RepoMap; type: 'overview' | 'area' | 'flow' | 'term' | 'convention'; id: string }
+  | { kind: 'usage'; report: string };
 
 export function renderView(v: View): string {
   switch (v.kind) {
@@ -65,6 +66,8 @@ export function renderView(v: View): string {
       return renderWalkthrough(v.walkthrough, v.index, v.names);
     case 'mapItem':
       return renderMapItem(v);
+    case 'usage':
+      return `<div class="usage">${markdown(v.report)}</div>`;
   }
 }
 

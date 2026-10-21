@@ -37,6 +37,8 @@ Jobs are split across three model slots, each set to **Automatic** by default. Y
 | Standard | concept descriptions, lessons, explanations | mid-tier (Sonnet-class; `sonnet`) |
 | Fast | quick explanations of words the map doesn't know | smallest (Haiku-class; `haiku`) |
 
+**codelearn: Show AI usage** (also in the sidebar's ... menu) lists every request codelearn has made, by model and kind, with token counts. Claude Code reports exact tokens; for Copilot they are estimated with the model's tokenizer.
+
 Most usage happens once per repo, during the first scan: one big request plus about one request per eight concepts. After that:
 
 - Hovers read saved text and make no requests.

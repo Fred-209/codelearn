@@ -33,6 +33,12 @@ describe('pickModel', () => {
     expect(pickModel(copilot, 'deep', 'some-retired-model')?.name).toBe('Claude Opus 5.5');
   });
 
+  it('treats GPT Luna as a fast model and GPT Sol as a deep one', () => {
+    const gpt = [m('GPT Sol 6'), m('GPT Luna 6'), m('GPT Luna 5')];
+    expect(pickModel(gpt, 'fast')?.name).toBe('GPT Luna 6');
+    expect(pickModel(gpt, 'deep')?.name).toBe('GPT Sol 6');
+  });
+
   it('falls back to the largest context window for deep when nothing matches', () => {
     const others = [m('Alpha', 'alpha', 32_000), m('Beta', 'beta', 200_000)];
     expect(pickModel(others, 'deep')?.name).toBe('Beta');

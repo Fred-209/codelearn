@@ -4,13 +4,18 @@ import type { ModelInfo, Slot } from './modelPick';
 import { AIProvider, AIRequest, AIResult, AIUnavailableError } from './provider';
 import { chooseProvider, NO_PROVIDER_HELP, PROVIDER_NAMES, ProviderId } from './providerChoice';
 import { VsCodeLmProvider } from './vscodeLm';
+import type { UsageEntry } from '../store/usageReport';
 
 /** Sends each request to the provider chosen by codelearn.provider. */
 export class ProviderRouter implements AIProvider {
   readonly copilot = new VsCodeLmProvider();
   readonly claude: ClaudeCodeProvider;
 
-  constructor(context: vscode.ExtensionContext) {
+  constructor(
+    context: vscode.ExtensionContext,
+    /** Called after every successful request, for the usage tally. */
+    private readonly onUsage?: (entry: Omit<UsageEntry, 'repo'>) => void,
+  ) {
     this.claude = new ClaudeCodeProvider(vscode.Uri.joinPath(context.globalStorageUri, 'claude-code'));
   }
 
@@ -36,9 +41,22 @@ export class ProviderRouter implements AIProvider {
   }
 
   async complete(req: AIRequest, token?: vscode.CancellationToken): Promise<AIResult> {
-    const target = await this.target();
-    if (!target) throw new AIUnavailableError(NO_PROVIDER_HELP);
-    return target.complete(req, token);
+    const id = await this.current();
+    const target = id === 'copilot' ? this.copilot : id === 'claude-code' ? this.claude : undefined;
+    if (!id || !target) throw new AIUnavailableError(NO_PROVIDER_HELP);
+    const result = await target.complete(req, token);
+    this.onUsage?.({
+      at: new Date().toISOString(),
+      provider: PROVIDER_NAMES[id],
+      model: result.model,
+      slot: req.slot,
+      purpose: req.purpose,
+      input: result.usage?.input,
+      output: result.usage?.output,
+      exact: result.usage?.exact ?? false,
+      costUSD: result.usage?.costUSD,
+    });
+    return result;
   }
 
   private async target(): Promise<AIProvider | undefined> {

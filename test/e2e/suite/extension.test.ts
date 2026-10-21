@@ -230,12 +230,16 @@ describe('codelearn in VS Code', () => {
       assert.strictEqual(await api.services.ai.name(), 'Claude Code');
       assert.strictEqual((await api.services.ai.modelFor('deep'))?.id, 'opus');
 
-      const reply = await api.services.ai.complete({ slot: 'fast', system: 'S', user: 'U', justification: '' });
+      const reply = await api.services.ai.complete({ slot: 'fast', system: 'S', user: 'U', justification: '', purpose: 'test' });
       assert.strictEqual(reply.text, `got ${'S\n\n---\n\nU'.length} chars for haiku`);
       assert.strictEqual(reply.model, 'fake-haiku');
 
+      // The request is in the usage tally.
+      await vscode.commands.executeCommand('codelearn.showUsage');
+      await until(() => tabLabels().includes('codelearn: AI usage'), 'usage tab');
+
       await assert.rejects(
-        () => api.services.ai.complete({ slot: 'deep', system: 'S', user: 'U', justification: '' }),
+        () => api.services.ai.complete({ slot: 'deep', system: 'S', user: 'U', justification: '', purpose: 'test' }),
         // The bundled extension has its own copy of AIUnavailableError, so check the message.
         (e: Error) => /not signed in/.test(e.message),
       );

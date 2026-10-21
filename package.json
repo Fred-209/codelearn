@@ -105,6 +105,12 @@
         "category": "codelearn"
       },
       {
+        "command": "codelearn.showUsage",
+        "title": "Show AI usage",
+        "category": "codelearn",
+        "icon": "$(graph)"
+      },
+      {
         "command": "codelearn.explainWord",
         "title": "Explain this word",
         "category": "codelearn"
@@ -184,6 +190,16 @@
           "command": "codelearn.buildMap",
           "when": "view == codelearn.map",
           "group": "navigation@2"
+        },
+        {
+          "command": "codelearn.chooseModels",
+          "when": "view == codelearn.map",
+          "group": "2_usage@1"
+        },
+        {
+          "command": "codelearn.showUsage",
+          "when": "view == codelearn.map",
+          "group": "2_usage@2"
         }
       ],
       "view/item/context": [

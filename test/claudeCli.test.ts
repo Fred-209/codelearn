@@ -39,7 +39,20 @@ describe('claudeArgs / claudeInput', () => {
 describe('parseClaudeOutput', () => {
   it('returns the text and the model that wrote it', () => {
     const usage = { 'claude-haiku-5-5': { outputTokens: 3 }, 'claude-opus-5-5': { outputTokens: 900 } };
-    expect(parseClaudeOutput(`${ok('{"a":1}', usage)}\n`)).toEqual({ text: '{"a":1}', model: 'claude-opus-5-5' });
+    expect(parseClaudeOutput(`${ok('{"a":1}', usage)}\n`)).toMatchObject({ text: '{"a":1}', model: 'claude-opus-5-5' });
+  });
+
+  it('adds up tokens across models, cached prompt tokens included', () => {
+    const out = JSON.stringify({
+      is_error: false,
+      result: 'x',
+      total_cost_usd: 0.013,
+      modelUsage: {
+        'claude-haiku-5-5': { inputTokens: 2000, outputTokens: 100 },
+        'claude-sonnet-5-5': { inputTokens: 2, cacheReadInputTokens: 4000, cacheCreationInputTokens: 300, outputTokens: 1200 },
+      },
+    });
+    expect(parseClaudeOutput(out).usage).toEqual({ input: 6302, output: 1300, exact: true, costUSD: 0.013 });
   });
 
   it('ignores log lines before the result', () => {

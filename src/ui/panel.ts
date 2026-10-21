@@ -120,6 +120,10 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     }
   }
 
+  showUsage(report: string): void {
+    this.show({ kind: 'usage', report });
+  }
+
   showLoading(title: string, message: string): void {
     this.show({ kind: 'loading', title, message });
   }
@@ -258,7 +262,7 @@ export class LearnPanel implements PanelHost, vscode.Disposable {
     await this.run('answering your question', async (token) => {
       const context = [v.concept.usage, v.lesson?.body.slice(0, 3000)].filter(Boolean).join('\n\n');
       const res = await this.s.ai.complete(
-        { slot: 'standard', ...askPrompt(question, v.concept.name, context, this.s.store.getProfile()), justification: 'codelearn answers your question.' },
+        { slot: 'standard', ...askPrompt(question, v.concept.name, context, this.s.store.getProfile()), justification: 'codelearn answers your question.', purpose: `question: ${v.concept.name}` },
         token,
       );
       entry.answer = res.text;
@@ -282,6 +286,8 @@ function titleFor(v: View): string {
       return `Walkthrough: ${v.walkthrough.title}`;
     case 'mapItem':
       return 'codelearn map';
+    case 'usage':
+      return 'codelearn: AI usage';
     default:
       return 'codelearn';
   }

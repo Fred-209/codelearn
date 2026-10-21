@@ -22,9 +22,10 @@ export interface ModelInfo {
 // Ordered preferences per slot. Names change often, so these are loose patterns;
 // anything unmatched falls back to a sensible default below.
 const PREFERENCES: Record<Slot, RegExp[]> = {
-  deep: [/opus/i, /gpt-5(?!.*\b(mini|nano)\b)/i, /gemini.*pro/i, /sonnet/i, /\bo\d\b(?!.*mini)/i],
-  standard: [/sonnet/i, /gpt-5(?!.*\bnano\b)/i, /gpt-4\.1/i, /gemini.*pro/i, /opus/i],
-  fast: [/haiku/i, /\b(mini|flash|nano)\b/i, /gpt-4o/i, /sonnet/i],
+  deep: [/opus/i, /gpt-5(?!.*\b(mini|nano)\b)/i, /\bsol\b/i, /gemini.*pro/i, /sonnet/i, /\bo\d\b(?!.*mini)/i],
+  standard: [/sonnet/i, /gpt-5(?!.*\bnano\b)/i, /\bsol\b/i, /gpt-4\.1/i, /gemini.*pro/i, /opus/i],
+  // GPT Luna is OpenAI's cheaper line.
+  fast: [/haiku/i, /\bluna\b/i, /\b(mini|flash|nano)\b/i, /gpt-4o/i, /sonnet/i],
 };
 
 function label(m: ModelInfo): string {

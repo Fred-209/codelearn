@@ -58,7 +58,7 @@ export class ClaudeCodeProvider implements AIProvider {
     const { stdout, stderr, code } = await run(launch, claudeArgs(model.id), claudeInput(req.system, req.user), this.workDir.fsPath, token);
     try {
       const reply = parseClaudeOutput(stdout, stderr, code);
-      return { text: reply.text, model: reply.model };
+      return reply;
     } catch (e) {
       if (e instanceof ClaudeCliError && e.needsSetup) throw new AIUnavailableError(e.message);
       throw e;

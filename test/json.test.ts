@@ -29,7 +29,7 @@ describe('extractJson', () => {
 });
 
 describe('completeJson', () => {
-  const req: AIRequest = { slot: 'standard', system: 's', user: 'u', justification: 'j' };
+  const req: AIRequest = { slot: 'standard', system: 's', user: 'u', justification: 'j', purpose: 'test' };
 
   it('retries once with the parse error when the reply is not JSON', async () => {
     const replies = ['not json at all', '{"ok": true}'];

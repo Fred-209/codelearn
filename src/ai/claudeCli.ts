@@ -5,6 +5,7 @@
 import * as path from 'path';
 import type { ModelInfo, Slot } from './modelPick';
 import { pickModel } from './modelPick';
+import type { TokenUsage } from './provider';
 
 /** Aliases the CLI resolves to the newest model of each tier. */
 export const CLAUDE_MODELS: ModelInfo[] = [
@@ -61,6 +62,7 @@ export function claudeInput(system: string, user: string): string {
 export interface ClaudeReply {
   text: string;
   model: string;
+  usage?: TokenUsage;
 }
 
 /** Thrown when the CLI ran but needs the learner to do something (log in, wait for a limit). */
@@ -98,7 +100,23 @@ export function parseClaudeOutput(stdout: string, stderr = '', exitCode: number 
     throw new ClaudeCliError(`Claude Code failed: ${firstLine(detail)}`);
   }
 
-  return { text: typeof result.result === 'string' ? result.result : '', model: modelUsed(result) };
+  return { text: typeof result.result === 'string' ? result.result : '', model: modelUsed(result), usage: usageOf(result) };
+}
+
+type ModelUsage = { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number };
+
+/** Tokens across every model the CLI called, cached prompt tokens included. */
+function usageOf(result: Record<string, unknown>): TokenUsage | undefined {
+  const usage = result.modelUsage;
+  if (!usage || typeof usage !== 'object') return undefined;
+  let input = 0;
+  let output = 0;
+  for (const u of Object.values(usage as Record<string, ModelUsage>)) {
+    input += (u?.inputTokens ?? 0) + (u?.cacheReadInputTokens ?? 0) + (u?.cacheCreationInputTokens ?? 0);
+    output += u?.outputTokens ?? 0;
+  }
+  const cost = typeof result.total_cost_usd === 'number' ? result.total_cost_usd : undefined;
+  return { input, output, exact: true, costUSD: cost };
 }
 
 /** The model that wrote most of the answer, from the result's per-model usage. */

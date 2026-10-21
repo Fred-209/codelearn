@@ -95,6 +95,7 @@ export class Explainer {
         slot: zoom === 'flow' ? 'deep' : 'standard',
         ...explainPrompt(zoom, file, code, extra, map, this.s.store.getProfile()),
         justification: 'codelearn explains the code you are reading.',
+        purpose: `explain ${zoom === 'line' ? 'code' : zoom}: ${file}`,
       },
       (v) => v,
       token,
@@ -112,7 +113,7 @@ export class Explainer {
     const context = numberedRange(doc, line - 6, line + 6);
     const { value, model } = await completeJson(
       this.s.ai,
-      { slot: 'fast', ...quickExplainPrompt(word, relPath(uri), context, this.s.store.getProfile()), justification: 'codelearn explains the code you are reading.' },
+      { slot: 'fast', ...quickExplainPrompt(word, relPath(uri), context, this.s.store.getProfile()), justification: 'codelearn explains the code you are reading.', purpose: `quick explain: ${word}` },
       (v) => v,
       token,
     );
