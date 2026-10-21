@@ -1,0 +1,183 @@
+// Runs inside a real VS Code (see ../runTest.ts). No AI model is available here,
+// so these tests seed the saved map, lessons and walkthroughs and check what the
+// learner sees.
+
+import * as assert from 'assert';
+import * as vscode from 'vscode';
+import type { CodelearnTestApi } from '../../../src/extension';
+import type { Lesson, RepoMap, Walkthrough } from '../../../src/store/types';
+import { MAP_VERSION } from '../../../src/store/types';
+
+const HANDLER = 'src/GetActivePaymentsHandler.cs';
+
+const map: RepoMap = {
+  version: MAP_VERSION,
+  repoName: 'sample-repo',
+  generatedAt: '2026-10-21T00:00:00Z',
+  model: 'test',
+  overview: 'A tiny payments sample.',
+  areas: [{ id: 'handlers', name: 'Handlers', summary: 'Request handlers', paths: ['src'] }],
+  flows: [{ id: 'get-active', name: 'Getting active payments', summary: 'Loads and filters payments.', files: [HANDLER] }],
+  concepts: [
+    {
+      id: 'linq',
+      name: 'LINQ',
+      kind: 'library',
+      summary: 'Query methods for collections.',
+      hover: 'LINQ filters and transforms collections, like Array.filter and map.',
+      match: ['Where', 'Select', 'ToList'],
+      prereqs: ['Lambdas'],
+      usage: 'Handlers filter repository results.',
+      citations: [{ file: HANDLER, line: 15, quote: '.Where(p => p.Amount > 0)', verified: true }],
+      docsSite: 'learn.microsoft.com',
+      searchQuery: 'C# LINQ',
+    },
+  ],
+  glossary: [{ term: 'Settlement batch', meaning: 'A group of payments settled together.', citations: [] }],
+  conventions: [{ rule: 'Handlers filter after loading', source: 'AGENTS.md', status: 'confirmed', evidence: [] }],
+  fileHashes: {},
+};
+
+const lesson: Lesson = {
+  conceptId: 'linq',
+  conceptName: 'C# LINQ',
+  depth: 'standard',
+  body: '### What it is\n\nLINQ adds query methods.',
+  comparisons: [],
+  usage: '',
+  citations: [],
+  pitfalls: [],
+  generatedAt: '2026-10-21T00:00:00Z',
+  model: 'test',
+  sourceHash: '',
+};
+
+const walkthrough: Walkthrough = {
+  id: 'test-walk',
+  title: 'LINQ in Handle',
+  summary: 'Filtering payments.',
+  generatedAt: '2026-10-21T00:00:00Z',
+  model: 'test',
+  steps: [
+    { file: HANDLER, line: 12, title: 'Load', body: 'Loads payments.', concepts: [], verified: true },
+    { file: HANDLER, line: 15, title: 'Filter', body: 'Keeps positive amounts.', concepts: ['linq'], verified: true },
+    { file: HANDLER, line: 17, title: 'Run', body: 'Runs the query.', concepts: [], verified: true },
+  ],
+};
+
+let api: CodelearnTestApi;
+let doc: vscode.TextDocument;
+
+function root(): vscode.Uri {
+  return vscode.workspace.workspaceFolders![0].uri;
+}
+
+async function hoverText(word: string, occurrence = 0): Promise<string> {
+  const text = doc.getText();
+  let index = -1;
+  for (let i = 0; i <= occurrence; i++) index = text.indexOf(word, index + 1);
+  assert.ok(index >= 0, `${word} not found in fixture`);
+  const pos = doc.positionAt(index + 1);
+  const hovers = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', doc.uri, pos);
+  return hovers
+    .flatMap((h) => h.contents)
+    .map((c) => (typeof c === 'string' ? c : 'value' in c ? c.value : ''))
+    .join('\n');
+}
+
+function tabLabels(): string[] {
+  return vscode.window.tabGroups.all.flatMap((g) => g.tabs).map((t) => t.label);
+}
+
+async function until(check: () => boolean, what: string, ms = 5000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) assert.fail(`Timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+describe('codelearn in VS Code', () => {
+  before(async () => {
+    const ext = vscode.extensions.getExtension<CodelearnTestApi>('fred-209.codelearn');
+    assert.ok(ext, 'extension not found');
+    api = await ext.activate();
+    await api.services.store.saveMap(map);
+    doc = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(root(), HANDLER));
+    await vscode.window.showTextDocument(doc);
+  });
+
+  it('registers every command it contributes', async () => {
+    const pkg = vscode.extensions.getExtension('fred-209.codelearn')!.packageJSON as { contributes: { commands: { command: string }[] } };
+    const registered = new Set(await vscode.commands.getCommands(true));
+    for (const { command } of pkg.contributes.commands) assert.ok(registered.has(command), `${command} is not registered`);
+  });
+
+  it('shows a teaching hover for a mapped concept, with lesson and step-through links', async () => {
+    const text = await hoverText('Where');
+    assert.match(text, /LINQ/);
+    assert.match(text, /like Array\.filter/);
+    assert.match(text, /Open lesson/);
+    assert.match(text, /Step through/);
+    assert.match(text, /I know this/);
+  });
+
+  it('shows business terms found inside identifiers', async () => {
+    const text = await hoverText('settlementBatch');
+    assert.match(text, /Settlement batch/);
+    assert.match(text, /settled together/);
+  });
+
+  it('offers an explain link for things the map does not know, without calling the AI', async () => {
+    const text = await hoverText('GetByAccountAsync');
+    assert.match(text, /codelearn: explain/);
+  });
+
+  it('shortens the hover once a concept is marked known, and keeps the lesson link', async () => {
+    await vscode.commands.executeCommand('codelearn.setConceptStatus', 'LINQ', 'known');
+    assert.strictEqual(api.services.store.getStatus('LINQ'), 'known');
+    const text = await hoverText('Where');
+    assert.match(text, /You know this/);
+    assert.match(text, /Open lesson/);
+    assert.match(text, /rusty/);
+    await vscode.commands.executeCommand('codelearn.setConceptStatus', 'LINQ', 'new');
+  });
+
+  it('opens a saved lesson in a tab beside the code', async () => {
+    await api.services.store.saveLesson(lesson, true);
+    await vscode.commands.executeCommand('codelearn.openLesson', 'linq');
+    await until(() => tabLabels().includes('Lesson: LINQ'), 'lesson tab');
+  });
+
+  it('walks through steps inline, switches to the panel and back, keeping its place', async () => {
+    await api.walks.start(walkthrough);
+    const view = api.services.store.getWalkthroughView();
+    assert.strictEqual(api.walks.current?.index, 0);
+    assert.strictEqual(api.walks.current?.view, view);
+
+    await vscode.commands.executeCommand('codelearn.walkthrough.next');
+    assert.strictEqual(api.walks.current?.index, 1);
+    assert.strictEqual(vscode.window.activeTextEditor?.selection.active.line, 14);
+
+    await vscode.commands.executeCommand('codelearn.walkthrough.openInPanel');
+    assert.strictEqual(api.walks.current?.view, 'panel');
+    assert.strictEqual(api.walks.current?.index, 1);
+    await until(() => tabLabels().includes('Walkthrough: LINQ in Handle'), 'walkthrough tab');
+    assert.strictEqual(api.services.store.getWalkthroughView(), 'panel', 'the panel choice should be remembered');
+
+    await vscode.commands.executeCommand('codelearn.walkthrough.backToInline');
+    assert.strictEqual(api.walks.current?.view, 'inline');
+    assert.strictEqual(api.walks.current?.index, 1);
+
+    await vscode.commands.executeCommand('codelearn.walkthrough.back');
+    assert.strictEqual(api.walks.current?.index, 0);
+
+    await vscode.commands.executeCommand('codelearn.walkthrough.end');
+    assert.strictEqual(api.walks.current, undefined);
+  });
+
+  it('opens map items such as flows in the panel', async () => {
+    await vscode.commands.executeCommand('codelearn.openMapItem', 'flow', 'get-active');
+    await until(() => tabLabels().includes('codelearn map'), 'map tab');
+  });
+});
