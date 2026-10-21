@@ -80,6 +80,7 @@ export class VsCodeLmProvider implements AIProvider {
           );
         }
       }
+      this.log?.info(`${req.purpose}: ${model.name} replied with ${reply.text.length} characters in ${Math.round(reply.ms / 1000)}s.`);
       return { text: reply.text, model: model.name, usage: await estimateUsage(model, messages[0], reply.text) };
     } catch (e) {
       throw friendlyError(e);

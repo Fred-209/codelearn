@@ -28,6 +28,11 @@ export function extractJson(text: string): unknown {
   throw new JsonExtractError(`The AI reply was not valid JSON (${(lastError as Error)?.message ?? 'no JSON found'}).`);
 }
 
+/** True when the reply starts a JSON object but never finishes it: it was cut off, usually at the output limit. */
+export function looksCutOff(text: string): boolean {
+  return text.includes('{') && !firstBalancedObject(text);
+}
+
 /** Finds the first {...} block with balanced braces, ignoring braces inside strings. */
 export function firstBalancedObject(text: string): string | undefined {
   const start = text.indexOf('{');

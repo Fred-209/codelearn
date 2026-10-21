@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractJson, firstBalancedObject, JsonExtractError } from '../src/ai/json';
-import { AIEmptyReplyError, completeJson, type AIProvider, type AIRequest } from '../src/ai/provider';
+import { AIEmptyReplyError, AIReplyCutOffError, completeJson, type AIProvider, type AIRequest } from '../src/ai/provider';
 
 describe('extractJson', () => {
   it('reads plain JSON', () => {
@@ -62,5 +62,35 @@ describe('completeJson', () => {
     };
     await expect(completeJson(provider, req, (v) => v)).rejects.toBeInstanceOf(AIEmptyReplyError);
     expect(calls).toBe(1);
+  });
+
+  it('asks for a shorter reply when the first was cut off, and says so if it happens again', async () => {
+    const prompts: string[] = [];
+    const cutOff = '{"concepts": [{"name": "MediatR", "summary": "Sends requests to handlers"}, ';
+    const provider: AIProvider = {
+      name: async () => 'fake',
+      listModels: async () => [],
+      modelFor: async () => undefined,
+      complete: async (r) => {
+        prompts.push(r.user);
+        return { text: cutOff, model: 'GPT Sol' };
+      },
+    };
+    const err = await completeJson(provider, { ...req, slot: 'deep' }, (v) => v).catch((e) => e);
+    expect(err).toBeInstanceOf(AIReplyCutOffError);
+    expect(err.message).toMatch(/cut off .*twice.*deep slot/);
+    expect(prompts[1]).toContain(`cut off after ${cutOff.length} characters`);
+  });
+
+  it('accepts a shorter complete reply after a cut-off one', async () => {
+    const replies = ['{"items": [1, 2, ', '{"items": [1]}'];
+    const provider: AIProvider = {
+      name: async () => 'fake',
+      listModels: async () => [],
+      modelFor: async () => undefined,
+      complete: async () => ({ text: replies.shift()!, model: 'm' }),
+    };
+    const res = await completeJson(provider, req, (v) => v as { items: number[] });
+    expect(res.value.items).toEqual([1]);
   });
 });

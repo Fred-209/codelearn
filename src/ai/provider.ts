@@ -1,5 +1,5 @@
 import type { CancellationToken } from 'vscode';
-import { extractJson, JsonExtractError } from './json';
+import { extractJson, JsonExtractError, looksCutOff } from './json';
 import type { ModelInfo, Slot } from './modelPick';
 
 export interface AIRequest {
@@ -47,8 +47,12 @@ export class AIUnavailableError extends Error {}
 /** The model answered with no text at all. Asking again for JSON won't help, so it isn't retried. */
 export class AIEmptyReplyError extends AIUnavailableError {}
 
+/** The model's replies kept stopping before the JSON was complete, so its output limit is too small. */
+export class AIReplyCutOffError extends AIUnavailableError {}
+
 /**
- * Asks for JSON, and if the reply doesn't parse, asks once more with the parse error.
+ * Asks for JSON, and if the reply doesn't parse, asks once more: for a shorter reply when the
+ * first was cut off, else with the parse error. An empty reply isn't asked again.
  * `normalize` turns the parsed value into a trusted shape (dropping anything malformed).
  */
 export async function completeJson<T>(
@@ -57,21 +61,35 @@ export async function completeJson<T>(
   normalize: (value: unknown) => T,
   token?: CancellationToken,
 ): Promise<{ value: T; model: string }> {
+  const parse = (r: AIResult): T => {
+    if (!r.text.trim()) {
+      throw new AIEmptyReplyError(`${r.model} sent back an empty reply. Try again, or pick another model for the ${req.slot} slot with "codelearn: Choose AI models".`);
+    }
+    return normalize(extractJson(r.text));
+  };
+
   const first = await provider.complete(req, token);
-  if (!first.text.trim()) {
-    throw new AIEmptyReplyError(`${first.model} sent back an empty reply. Try again, or pick another model with "codelearn: Choose AI models".`);
-  }
   try {
-    return { value: normalize(extractJson(first.text)), model: first.model };
+    return { value: parse(first), model: first.model };
   } catch (e) {
     if (!(e instanceof JsonExtractError)) throw e;
-    const retry = await provider.complete(
-      {
-        ...req,
-        user: `${req.user}\n\nYour previous reply could not be parsed: ${e.message}\nReply again with ONLY the JSON object, no prose and no code fences.`,
-      },
-      token,
-    );
-    return { value: normalize(extractJson(retry.text)), model: retry.model };
+    const cut = looksCutOff(first.text);
+    const ask = cut
+      ? `Your previous reply was cut off after ${first.text.length} characters, before the JSON was complete. ` +
+        `Reply again with the complete JSON object in well under ${Math.round(first.text.length * 0.6)} characters: fewer items and shorter text. No prose and no code fences.`
+      : `Your previous reply could not be parsed: ${e.message}\nReply again with ONLY the JSON object, no prose and no code fences.`;
+    const retry = await provider.complete({ ...req, user: `${req.user}\n\n${ask}` }, token);
+    try {
+      return { value: parse(retry), model: retry.model };
+    } catch (e2) {
+      if (!(e2 instanceof JsonExtractError)) throw e2;
+      if (looksCutOff(retry.text)) {
+        throw new AIReplyCutOffError(
+          `${retry.model}'s reply was cut off before the JSON was complete${cut ? ', twice' : ''} (${first.text.length} then ${retry.text.length} characters). ` +
+            `Its output limit is probably too small for this request: pick another model for the ${req.slot} slot with "codelearn: Choose AI models".`,
+        );
+      }
+      throw new JsonExtractError(`${retry.model}'s reply was not valid JSON, twice (${first.text.length} then ${retry.text.length} characters; ${e2.message.replace(/^The AI reply was not valid JSON /, '')}).`);
+    }
   }
 }
