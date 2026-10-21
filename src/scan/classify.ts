@@ -44,8 +44,29 @@ const MANIFEST_PATTERNS: RegExp[] = [
   /(^|\/)tsconfig\.json$/i,
   /(^|\/)(\.eslintrc(\.\w+)?|eslint\.config\.\w+)$/i,
   /(^|\/)appsettings(\.\w+)?\.json$/i,
-  /(^|\/)docker-compose\.ya?ml$/i,
-  /(^|\/)Dockerfile$/i,
+];
+
+/**
+ * How the software is built, deployed and hosted: CI/CD pipelines, infrastructure as code,
+ * containers and hosting-platform config. These say where each part runs (a static web app,
+ * a function app, a container), which the code alone often doesn't.
+ */
+const DEPLOY_PATTERNS: RegExp[] = [
+  /^\.github\/workflows\/[^/]+\.ya?ml$/i,
+  /(^|\/)azure-pipelines[\w.-]*\.ya?ml$/i,
+  /(^|\/)\.?(pipelines?|azure-pipelines|azure|azuredevops|devops|ci|cd|deploy|deployment|deployments)\/(.+\/)?[^/]+\.ya?ml$/i,
+  /(^|\/)\.gitlab-ci\.ya?ml$/i,
+  /(^|\/)bitbucket-pipelines\.ya?ml$/i,
+  /(^|\/)\.circleci\/config\.ya?ml$/i,
+  /(^|\/)Jenkinsfile$/i,
+  /(^|\/)(cloudbuild|buildspec|appveyor|\.travis|skaffold|serverless|render|azure|app)\.ya?ml$/i,
+  /\.(bicep|bicepparam|tf|tfvars)$/i,
+  /(^|\/)(azuredeploy|mainTemplate)(\.parameters)?\.json$/i,
+  /(^|\/)(staticwebapp\.config|swa-cli\.config|host|function|proxies|vercel|firebase)\.json$/i,
+  /(^|\/)(netlify|fly|wrangler)\.toml$/i,
+  /(^|\/)(Procfile|Dockerfile|Containerfile)(\.[\w-]+)?$/i,
+  /(^|\/)docker-compose[\w.-]*\.ya?ml$/i,
+  /(^|\/)(k8s|kubernetes|helm|charts?|manifests|infra|infrastructure|iac|terraform|bicep)\/(.+\/)?[^/]+\.(ya?ml|json)$/i,
 ];
 
 const CODE_EXTENSIONS = new Set([
@@ -54,48 +75,59 @@ const CODE_EXTENSIONS = new Set([
   'sql', 'sh', 'ps1', 'vue', 'svelte', 'razor', 'cshtml', 'graphql', 'proto', 'tf', 'hs', 'ml', 'elm', 'zig',
 ]);
 
-export type FileRole = 'instruction' | 'manifest' | 'code' | 'other';
+/** Markup that binds to code: searched for examples, and summarised for the map. */
+const TEMPLATE_EXTENSIONS = new Set([
+  'html', 'htm', 'liquid', 'hbs', 'handlebars', 'mustache', 'ejs', 'pug', 'njk', 'jinja', 'jinja2', 'j2', 'twig', 'erb', 'xaml', 'aspx', 'ascx',
+]);
 
-export function classify(path: string): FileRole {
-  if (INSTRUCTION_PATTERNS.some((p) => p.test(path))) return 'instruction';
-  if (MANIFEST_PATTERNS.some((p) => p.test(path))) return 'manifest';
-  const ext = path.split('.').pop()?.toLowerCase() ?? '';
-  return CODE_EXTENSIONS.has(ext) ? 'code' : 'other';
+export type FileRole = 'instruction' | 'manifest' | 'deploy' | 'code' | 'template' | 'other';
+
+/** Secrets and machine-local settings: never read, never sent. */
+const SECRET_PATH =
+  /(^|\/)(\.env(\.[\w.-]+)?|local\.settings\.json|(secrets?|credentials)([.-][\w-]+)*\.(json|ya?ml|xml|ini|txt|toml|env|config|properties|cfg)|credentials|[^/]*\.(pem|key|pfx|p12|jks|keystore|crt|cer)|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|\.npmrc|\.pypirc|\.netrc)$/i;
+
+export function isSecretPath(path: string): boolean {
+  return SECRET_PATH.test(path);
 }
 
-const ENTRY_NAMES = /(^|\/)(program|main|index|app|startup|server|application|bootstrap|module|routes?|urls|manage)\.[a-z]+$/i;
+export function classify(path: string): FileRole {
+  if (SECRET_PATH.test(path)) return 'other';
+  if (INSTRUCTION_PATTERNS.some((p) => p.test(path))) return 'instruction';
+  if (MANIFEST_PATTERNS.some((p) => p.test(path))) return 'manifest';
+  if (DEPLOY_PATTERNS.some((p) => p.test(path))) return 'deploy';
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  if (CODE_EXTENSIONS.has(ext)) return 'code';
+  return TEMPLATE_EXTENSIONS.has(ext) ? 'template' : 'other';
+}
+
+/** Startup-looking names, with an optional qualifier: "Program.cs", "startup.design.ts", "app.module.ts". */
+export const ENTRY_NAMES = /(^|\/)(program|main|index|app|startup|server|application|bootstrap|module|routes?|urls|manage|wsgi|asgi)(\.[a-z][\w-]*)?\.[a-z]+$/i;
 const TEST_PATH = /(^|\/)(tests?|specs?|__tests__)(\/|$)|\.(test|spec)\.[a-z]+$|Tests?\.[a-z]+$/i;
+/** Code that shows how to use the project rather than being it. */
+const EXAMPLE_PATH = /(^|\/)(examples?|samples?|scaffolds?|community|demos?|fixtures?|mocks?|__mocks__|stories|storybook|benchmarks?|e2e|playground|sandbox|docs?)(\/|$)|\.(stories|mock|fixture)\.[a-z]+$/i;
+const GENERATED_PATH = /\.d\.ts$|\.g\.(cs|dart)$|\.Designer\.cs$|\.generated\.|(^|\/)(generated|gen)\/|\.pb\.go$|_pb2\.py$|(^|\/)migrations?\//i;
+
+export function isTest(path: string): boolean {
+  return TEST_PATH.test(path);
+}
+
+/** Tests, examples, samples and generated code: read last, if at all. */
+export function isLowValue(path: string): boolean {
+  return TEST_PATH.test(path) || EXAMPLE_PATH.test(path) || GENERATED_PATH.test(path);
+}
 
 /**
- * Orders code files so a sample covers the repo: entry points first, then one file
- * per folder round-robin (larger files first within a folder), tests last.
+ * Cheap importance from the path alone, for repos over the file limit: instruction files and
+ * manifests first, then code (startup files first, examples and tests last), then templates.
  */
-export function sampleOrder(files: { path: string; size: number }[]): string[] {
-  const entries = files.filter((f) => ENTRY_NAMES.test(f.path) && !TEST_PATH.test(f.path));
-  const rest = files.filter((f) => !entries.includes(f));
-  const byFolder = new Map<string, { path: string; size: number }[]>();
-  for (const f of rest) {
-    const folder = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '';
-    const list = byFolder.get(folder) ?? [];
-    list.push(f);
-    byFolder.set(folder, list);
-  }
-  for (const list of byFolder.values()) list.sort((a, b) => b.size - a.size);
-
-  const ordered: string[] = entries.sort((a, b) => a.path.length - b.path.length).map((f) => f.path);
-  const tests: string[] = [];
-  const queues = [...byFolder.values()];
-  let added = true;
-  while (added) {
-    added = false;
-    for (const q of queues) {
-      const next = q.shift();
-      if (!next) continue;
-      added = true;
-      (TEST_PATH.test(next.path) ? tests : ordered).push(next.path);
-    }
-  }
-  return [...ordered, ...tests];
+export function pathPriority(path: string, role: FileRole): number {
+  const base = { instruction: 100, manifest: 90, deploy: 80, code: 50, template: 30, other: 0 }[role];
+  if (role !== 'code' && role !== 'template') return base;
+  const depth = path.split('/').length;
+  let p = base - Math.min(depth, 10) * 0.5;
+  if (role === 'code' && ENTRY_NAMES.test(path)) p += 10;
+  if (isLowValue(path)) p -= 35;
+  return p;
 }
 
 /**

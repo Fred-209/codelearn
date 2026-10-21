@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { CLAUDE_MODELS, claudeArgs, claudeCandidates, ClaudeCliError, claudeInput, claudeModelFor, parseClaudeOutput } from './claudeCli';
 import { effortFor, ModelInfo, Slot } from './modelPick';
+import { lookupNote, lookupRounds } from './lookups';
 import { AIProvider, AIRequest, AIResult, AIUnavailableError } from './provider';
 
 /** How to start the CLI: a native binary, or the JS entry point run by VS Code's own Node. */
@@ -55,10 +56,25 @@ export class ClaudeCodeProvider implements AIProvider {
     // Run outside the repo so the CLI doesn't pick up the project's own CLAUDE.md or settings.
     await fs.promises.mkdir(this.workDir.fsPath, { recursive: true });
 
-    const { stdout, stderr, code } = await run(launch, claudeArgs(model.id, effortFor(req.slot, effortSetting(req.slot))), claudeInput(req.system, req.user), this.workDir.fsPath, token);
+    const effort = effortFor(req.slot, effortSetting(req.slot));
+    const lookups = req.lookups && req.lookups.max > 0 && req.lookups.root ? req.lookups : undefined;
+    const ask = async (withLookups: boolean, note = '') => {
+      const args = withLookups && lookups ? claudeArgs(model.id, effort, { root: lookups.root!, maxTurns: lookupRounds(lookups.max) + 2 }) : claudeArgs(model.id, effort);
+      const how = `the repository is the folder ${lookups?.root}; read it with the Read, Grep and Glob tools, and nothing outside it.`;
+      const user = `${req.user}${withLookups && lookups ? lookupNote(lookups.max, how) : ''}${note}`;
+      const { stdout, stderr, code } = await run(launch, args, claudeInput(req.system, user), this.workDir.fsPath, token);
+      return parseClaudeOutput(stdout, stderr, code);
+    };
     try {
-      const reply = parseClaudeOutput(stdout, stderr, code);
-      return reply;
+      if (!lookups) return await ask(false);
+      try {
+        const reply = await ask(true);
+        return { ...reply, lookups: Math.max(0, (reply.turns ?? 1) - 1) };
+      } catch (e) {
+        // It spent its turns looking things up: ask once more, for an answer without lookups.
+        if (!(e instanceof ClaudeCliError && e.outOfTurns)) throw e;
+        return await ask(false, '\n\nAnswer from the code above; there is no way to look anything else up.');
+      }
     } catch (e) {
       if (e instanceof ClaudeCliError && e.needsSetup) throw new AIUnavailableError(e.message);
       throw e;

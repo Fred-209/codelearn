@@ -1,8 +1,8 @@
 {
   "name": "codelearn",
   "displayName": "codelearn",
-  "description": "Learn an unfamiliar codebase from inside VS Code: teaching hovers, lessons, walkthroughs and a map of the repo, written by GitHub Copilot or Claude Code.",
-  "version": "0.1.2",
+  "description": "Learn an unfamiliar codebase from inside VS Code: an architecture map, flows followed through the code, teaching hovers, lessons with real examples and walkthroughs, written by GitHub Copilot or Claude Code.",
+  "version": "0.2.0",
   "publisher": "fred-209",
   "license": "UNLICENSED",
   "private": true,
@@ -40,6 +40,18 @@
         "command": "codelearn.updateMap",
         "title": "Update map (changed files only)",
         "category": "codelearn"
+      },
+      {
+        "command": "codelearn.investigate",
+        "title": "Investigate a question…",
+        "category": "codelearn",
+        "icon": "$(question)"
+      },
+      {
+        "command": "codelearn.exploreArea",
+        "title": "Explore deeper",
+        "category": "codelearn",
+        "icon": "$(zoom-in)"
       },
       {
         "command": "codelearn.whatsHappening",
@@ -187,9 +199,14 @@
           "group": "navigation@1"
         },
         {
+          "command": "codelearn.investigate",
+          "when": "view == codelearn.map && codelearn.hasMap",
+          "group": "navigation@2"
+        },
+        {
           "command": "codelearn.buildMap",
           "when": "view == codelearn.map",
-          "group": "navigation@2"
+          "group": "navigation@3"
         },
         {
           "command": "codelearn.chooseModels",
@@ -206,6 +223,11 @@
         {
           "command": "codelearn.startFlowWalkthrough",
           "when": "view == codelearn.map && viewItem == flow",
+          "group": "inline"
+        },
+        {
+          "command": "codelearn.exploreArea",
+          "when": "view == codelearn.map && viewItem == area",
           "group": "inline"
         }
       ],
@@ -236,6 +258,10 @@
         },
         {
           "command": "codelearn.startFlowWalkthrough",
+          "when": "false"
+        },
+        {
+          "command": "codelearn.exploreArea",
           "when": "false"
         },
         {
@@ -280,7 +306,22 @@
     "viewsWelcome": [
       {
         "view": "codelearn.map",
-        "contents": "No map for this repo yet. codelearn reads the code, finds its main areas, flows and concepts, and prepares lessons so hovers are instant.\n[Build map](command:codelearn.buildMap)\nYou'll see an estimate of AI requests before anything is sent.\n[Tell codelearn what you know](command:codelearn.setupProfile)"
+        "contents": "No map for this repo yet. codelearn reads the code, works out its parts and how they connect, follows its main flows and finds the concepts it uses, so hovers and lessons are ready.\n[Build map](command:codelearn.buildMap)\nYou'll see an estimate of AI requests before anything is sent.\n[Tell codelearn what you know](command:codelearn.setupProfile)"
+      },
+      {
+        "view": "codelearn.map",
+        "when": "codelearn.aiProvider == copilot",
+        "contents": "AI: GitHub Copilot. codelearn picks a model for each job, so there's nothing to set up. [Change models](command:codelearn.chooseModels)"
+      },
+      {
+        "view": "codelearn.map",
+        "when": "codelearn.aiProvider == claude-code",
+        "contents": "AI: Claude Code, with your Claude login. codelearn picks a model for each job, so there's nothing to set up. [Change models](command:codelearn.chooseModels)"
+      },
+      {
+        "view": "codelearn.map",
+        "when": "codelearn.aiProvider == none",
+        "contents": "No AI found yet. codelearn uses GitHub Copilot Chat or Claude Code; neither needs an API key. [Choose AI models](command:codelearn.chooseModels)"
       }
     ],
     "configuration": {
@@ -373,6 +414,11 @@
           "scope": "machine",
           "markdownDescription": "How hard the Fast model thinks. `auto` is the recommendation, `low`."
         },
+        "codelearn.ai.lookups": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let the AI search and read files in this repo while it builds the map, explains code or writes a lesson about it. Read only, and capped per request (for example 12 lookups when following a flow). Files that usually hold secrets (`.env` files, keys, local settings) are kept out of its reach. Turn off to send only the code codelearn picks itself."
+        },
         "codelearn.hover.enabled": {
           "type": "boolean",
           "default": true,
@@ -387,6 +433,11 @@
           "type": "boolean",
           "default": false,
           "description": "Generate an explanation automatically when you hover over something the map doesn't know. Uses an AI request per new symbol; results are saved."
+        },
+        "codelearn.lessons.checkDocLinks": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Before a lesson shows a link to official documentation, open the page to check that it exists on the docs site. Turn off if your network blocks those sites: links then show unchecked. Search links are always shown."
         },
         "codelearn.walkthrough.defaultView": {
           "type": "string",
@@ -419,6 +470,10 @@
             "**/vendor/**",
             "**/.venv/**",
             "**/__pycache__/**",
+            "**/coverage/**",
+            "**/.next/**",
+            "**/.angular/**",
+            "**/wwwroot/lib/**",
             "**/*.min.js",
             "**/*.map",
             "**/package-lock.json",

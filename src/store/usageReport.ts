@@ -14,6 +14,8 @@ export interface UsageEntry {
   /** false when tokens were estimated (Copilot doesn't report them). */
   exact: boolean;
   costUSD?: number;
+  /** Lookups the model made in the repo while answering. */
+  lookups?: number;
 }
 
 interface Totals {
@@ -94,14 +96,15 @@ export function usageReport(entries: UsageEntry[], now: Date): string {
   out.push('', '## Latest requests', '', '| When | What | Repo | Model | In | Out |', '| --- | --- | --- | --- | ---: | ---: |');
   for (const e of [...entries].reverse().slice(0, 30)) {
     const when = new Date(e.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    out.push(`| ${when} | ${cell(e.purpose)} | ${cell(e.repo)} | ${cell(e.model)} | ${tokens(e.input ?? 0, !e.exact)} | ${tokens(e.output ?? 0, !e.exact)} |`);
+    const what = `${e.purpose}${e.lookups ? ` (${e.lookups} ${e.lookups === 1 ? 'lookup' : 'lookups'})` : ''}`;
+    out.push(`| ${when} | ${cell(what)} | ${cell(e.repo)} | ${cell(e.model)} | ${tokens(e.input ?? 0, !e.exact)} | ${tokens(e.output ?? 0, !e.exact)} |`);
   }
 
   out.push(
     '',
     '---',
     '',
-    'A retry after an unreadable reply counts as its own request. Token counts marked ~ are estimates from the model\'s tokenizer, because Copilot doesn\'t report them to extensions. Copilot charges AI credits by tokens at each model\'s rate, so the cheapest way to cut usage is a cheaper model in a busy slot (see codelearn: Choose AI models). ' +
+    'A retry after an unreadable reply counts as its own request. When the AI looks things up in the repo, each round of lookups sends the conversation again, and the tokens of every round are counted. Token counts marked ~ are estimates from the model\'s tokenizer, because Copilot doesn\'t report them to extensions. Copilot charges AI credits by tokens at each model\'s rate, so the cheapest way to cut usage is a cheaper model in a busy slot (see codelearn: Choose AI models). ' +
       (hasCost ? 'Claude Code reports exact tokens. "API list price" is what the same tokens would cost on the Claude API; a Claude subscription counts them against its usage limits instead.' : ''),
   );
   return out.join('\n');

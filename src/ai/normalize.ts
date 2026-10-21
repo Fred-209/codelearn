@@ -2,6 +2,9 @@
 // rather than thrown, so one bad entry doesn't lose a whole scan.
 
 import type {
+  Architecture,
+  ArchitectureLink,
+  ArchitecturePart,
   Area,
   CheckQuestion,
   Citation,
@@ -10,7 +13,9 @@ import type {
   ConceptKind,
   Convention,
   Flow,
+  FlowStep,
   GlossaryTerm,
+  KeyFile,
   WalkthroughStep,
 } from '../store/types';
 
@@ -66,11 +71,17 @@ export function kind(v: unknown): ConceptKind {
   return KINDS.includes(k) ? k : 'pattern';
 }
 
+/** Literal code that shows a concept in use, e.g. `data-bind="`: at least 3 characters each. */
+export function patterns(v: unknown): string[] {
+  return [...new Set(strs(v).map((p) => p.slice(0, 80)).filter((p) => p.length >= 3))].slice(0, 6);
+}
+
 /** Concept from the map pass: everything except hover/usage, which come later. */
 export function conceptSkeleton(v: unknown): Concept | undefined {
   const o = obj(v);
   const name = str(o.name);
   if (!name) return undefined;
+  const pats = patterns(o.patterns);
   return {
     id: slug(str(o.id) || name),
     name,
@@ -83,14 +94,37 @@ export function conceptSkeleton(v: unknown): Concept | undefined {
     citations: citations(o.citations),
     docsSite: str(o.docsSite) || undefined,
     searchQuery: str(o.searchQuery) || undefined,
+    ...(pats.length ? { patterns: pats } : {}),
   };
+}
+
+export function keyFile(v: unknown): KeyFile | undefined {
+  const o = obj(v);
+  const file = normalizePath(str(o.file));
+  return file ? { file, role: str(o.role) } : undefined;
 }
 
 export function area(v: unknown): Area | undefined {
   const o = obj(v);
   const name = str(o.name);
   if (!name) return undefined;
-  return { id: slug(str(o.id) || name), name, summary: str(o.summary), paths: strs(o.paths).map(normalizePath) };
+  const details = str(o.details);
+  const keyFiles = list(o.keyFiles, keyFile, 15);
+  return {
+    id: slug(str(o.id) || name),
+    name,
+    summary: str(o.summary),
+    paths: strs(o.paths).map(normalizePath),
+    ...(details ? { details } : {}),
+    ...(keyFiles.length ? { keyFiles } : {}),
+  };
+}
+
+export function flowStep(v: unknown): FlowStep | undefined {
+  const s = step(v);
+  if (!s) return undefined;
+  const { concepts, ...rest } = s;
+  return concepts.length ? { ...rest, concepts } : rest;
 }
 
 export function flow(v: unknown): Flow | undefined {
@@ -98,13 +132,62 @@ export function flow(v: unknown): Flow | undefined {
   const name = str(o.name);
   if (!name) return undefined;
   const entry = citation(o.entry);
+  const steps = list(o.steps, flowStep, 16);
+  const part = str(o.part);
+  const details = str(o.details);
   return {
     id: slug(str(o.id) || name),
     name,
     summary: str(o.summary),
     files: strs(o.files).map(normalizePath).slice(0, 15),
     ...(entry ? { entry } : {}),
+    ...(steps.length ? { steps } : {}),
+    ...(part ? { part: slug(part) } : {}),
+    ...(details ? { details } : {}),
   };
+}
+
+export function architecturePart(v: unknown): ArchitecturePart | undefined {
+  const o = obj(v);
+  const name = str(o.name);
+  if (!name) return undefined;
+  const entry = citation(o.entry);
+  const runs = str(o.runs);
+  return {
+    id: slug(str(o.id) || name),
+    name,
+    summary: str(o.summary),
+    paths: strs(o.paths).map(normalizePath).slice(0, 12),
+    ...(entry ? { entry } : {}),
+    ...(runs ? { runs } : {}),
+    ...(o.external === true ? { external: true } : {}),
+  };
+}
+
+export function architectureLink(v: unknown): ArchitectureLink | undefined {
+  const o = obj(v);
+  const from = slug(str(o.from));
+  const to = slug(str(o.to));
+  const how = str(o.how);
+  if (!str(o.from) || !str(o.to) || !how) return undefined;
+  const evidence = citation(o.evidence);
+  return { from, to, how, ...(evidence ? { evidence } : {}) };
+}
+
+/** The parts and how they connect. Links between unknown parts are dropped. */
+export function architecture(v: unknown): Architecture | undefined {
+  const o = obj(v);
+  const parts = uniqueById(list(o.parts, architecturePart, 16));
+  if (parts.length === 0) return undefined;
+  const ids = new Set(parts.map((p) => p.id));
+  const seen = new Set<string>();
+  const links = list(o.links, architectureLink, 60).filter((l) => {
+    const key = `${l.from}>${l.to}>${l.how}`;
+    if (!ids.has(l.from) || !ids.has(l.to) || l.from === l.to || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { summary: str(o.summary), parts, links };
 }
 
 export function glossaryTerm(v: unknown): GlossaryTerm | undefined {
@@ -181,6 +264,7 @@ export interface MapSkeleton {
   concepts: Concept[];
   glossary: GlossaryTerm[];
   conventions: Convention[];
+  architecture?: Architecture;
 }
 
 export function mapSkeleton(v: unknown): MapSkeleton {
@@ -189,14 +273,84 @@ export function mapSkeleton(v: unknown): MapSkeleton {
   if (!overview && arr(o.concepts).length === 0) {
     throw new Error('The AI reply did not contain a repo map.');
   }
+  const arch = architecture(o.architecture);
   return {
     overview,
     areas: uniqueById(list(o.areas, area, 15)),
-    flows: uniqueById(list(o.flows, flow, 12)),
+    flows: uniqueById(list(o.flows, flow, 16)),
     concepts: uniqueById(list(o.concepts, conceptSkeleton, 80)),
     glossary: list(o.glossary, glossaryTerm, 80),
     conventions: list(o.conventions, convention, 40),
+    ...(arch ? { architecture: arch } : {}),
   };
+}
+
+/** What a deep dive found by following one flow through the code. */
+export interface DiveResult {
+  summary: string;
+  details: string;
+  part?: string;
+  files: string[];
+  steps: FlowStep[];
+  /** Ids of known concepts at play. */
+  concepts: string[];
+  newConcepts: Concept[];
+  glossary: GlossaryTerm[];
+}
+
+export function dive(v: unknown): DiveResult {
+  const o = obj(v);
+  const steps = list(o.steps, flowStep, 16);
+  if (steps.length === 0) throw new Error('The AI reply had no steps for this flow.');
+  const part = str(o.part);
+  return {
+    summary: str(o.summary),
+    details: str(o.details),
+    ...(part ? { part: slug(part) } : {}),
+    files: strs(o.files).map(normalizePath).slice(0, 20),
+    steps,
+    concepts: strs(o.concepts).map(slug).slice(0, 20),
+    newConcepts: uniqueById(list(o.newConcepts, conceptSkeleton, 12)),
+    glossary: list(o.glossary, glossaryTerm, 12),
+  };
+}
+
+/** The final big picture, written after the deep dives. */
+export interface Synthesis {
+  overview: string;
+  architecture?: Architecture;
+  areas: Area[];
+}
+
+export function synthesis(v: unknown): Synthesis {
+  const o = obj(v);
+  const overview = str(o.overview);
+  const arch = architecture(o.architecture);
+  if (!overview && !arch) throw new Error('The AI reply had no overview.');
+  return { overview, ...(arch ? { architecture: arch } : {}), areas: uniqueById(list(o.areas, area, 15)) };
+}
+
+/** "Explore deeper" on one area. */
+export interface AreaDetails {
+  summary: string;
+  details: string;
+  keyFiles: KeyFile[];
+  flows: Flow[];
+}
+
+export function areaDetails(v: unknown): AreaDetails {
+  const o = obj(v);
+  const details = str(o.details);
+  if (!details) throw new Error('The AI reply had no explanation of this area.');
+  return { summary: str(o.summary), details, keyFiles: list(o.keyFiles, keyFile, 15), flows: uniqueById(list(o.flows, flow, 4)) };
+}
+
+/** "Investigate": the answer to a question, as a flow through the code. */
+export function investigation(v: unknown): Flow {
+  const o = obj(v);
+  const f = flow({ ...o, name: str(o.name) || str(o.title) });
+  if (!f || (!f.details && !f.steps?.length)) throw new Error('The AI reply had no answer.');
+  return f;
 }
 
 /** What "Update map" found in changed files. Throws only if the reply isn't an object at all. */

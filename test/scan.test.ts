@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classify, folderSummary, regexOutline, sampleOrder } from '../src/scan/classify';
+import { classify, folderSummary, isLowValue, pathPriority, regexOutline } from '../src/scan/classify';
 import { buildDigest, changedFiles, findOccurrences, numbered, RepoFile } from '../src/scan/digest';
 
 describe('classify', () => {
@@ -26,23 +26,30 @@ describe('classify', () => {
     expect(classify('src/Payments.Api/appsettings.Production.json')).toBe('manifest');
     expect(classify('src/Handlers/CreatePayment.cs')).toBe('code');
     expect(classify('app/main.py')).toBe('code');
+    expect(classify('src/components/signin/signin.html')).toBe('template');
+    expect(classify('templates/page.liquid')).toBe('template');
+    expect(classify('Views/Home/Index.cshtml')).toBe('code');
     expect(classify('assets/logo.png')).toBe('other');
   });
 });
 
-describe('sampleOrder', () => {
-  it('puts entry points first, spreads across folders, and tests last', () => {
-    const order = sampleOrder([
-      { path: 'src/A/One.cs', size: 10 },
-      { path: 'src/A/Two.cs', size: 500 },
-      { path: 'src/B/Three.cs', size: 50 },
-      { path: 'src/Api/Program.cs', size: 5 },
-      { path: 'tests/A/OneTests.cs', size: 900 },
-    ]);
-    expect(order[0]).toBe('src/Api/Program.cs');
-    expect(order.indexOf('src/A/Two.cs')).toBeLessThan(order.indexOf('src/A/One.cs'));
-    expect(order.indexOf('src/B/Three.cs')).toBeLessThan(order.indexOf('src/A/One.cs'));
-    expect(order[order.length - 1]).toBe('tests/A/OneTests.cs');
+describe('pathPriority and isLowValue', () => {
+  it('keeps instructions and manifests, then startup files, then other code, then templates, then examples and tests', () => {
+    const p = (path: string) => pathPriority(path, classify(path));
+    expect(p('AGENTS.md')).toBeGreaterThan(p('package.json'));
+    expect(p('package.json')).toBeGreaterThan(p('src/startup.design.ts'));
+    expect(p('src/startup.design.ts')).toBeGreaterThan(p('src/services/usersService.ts'));
+    expect(p('src/services/usersService.ts')).toBeGreaterThan(p('src/components/signin/signin.html'));
+    expect(p('src/components/signin/signin.html')).toBeGreaterThan(p('examples/widget/index.ts'));
+  });
+
+  it('treats tests, examples, scaffolds and generated code as low value', () => {
+    for (const path of ['tests/a.ts', 'src/a.spec.ts', 'examples/x/y.ts', 'scaffolds/widget/w.ts', 'community/widgets/a.ts', 'src/types.d.ts', 'Migrations/2024_Init.cs', 'src/Foo.Designer.cs']) {
+      expect(isLowValue(path), path).toBe(true);
+    }
+    for (const path of ['src/startup.runtime.ts', 'src/services/usersService.ts', 'src/Payments.Api/Program.cs']) {
+      expect(isLowValue(path), path).toBe(false);
+    }
   });
 });
 
@@ -69,7 +76,10 @@ describe('buildDigest', () => {
     expect(d.text).toContain('Every command has a validator.');
     expect(d.text).toContain('MediatR');
     expect(d.text).toContain('1| var builder');
-    expect(d.sampledFiles).toEqual(['src/Api/Program.cs', 'src/App/Handler.cs']);
+    expect(d.text).toContain('## Entry points');
+    expect(d.text).toContain('- src/Api/Program.cs: ');
+    expect(d.sampledFiles[0]).toBe('src/Api/Program.cs');
+    expect(d.sampledFiles).toContain('src/App/Handler.cs');
   });
 
   it('stays within budget', () => {
@@ -90,6 +100,19 @@ describe('findOccurrences', () => {
     expect(findOccurrences(files, ['Where'], 4)).toEqual([
       { file: 'a.cs', line: 1, text: 'var x = items.Where(i => i.Ok);' },
       { file: 'c.cs', line: 1, text: 'list.Where(q)' },
+    ]);
+  });
+
+  it('finds literal patterns in templates, real code before tests', () => {
+    const files: RepoFile[] = [
+      { path: 'tests/signin.spec.ts', text: 'ko.observable(1)', size: 1 },
+      { path: 'src/signin.html', text: '<div>\n  <input data-bind="value: username" />\n</div>', size: 1 },
+      { path: 'src/signin.ts', text: 'this.username = ko.observable("");', size: 1 },
+    ];
+    expect(findOccurrences(files, [], 4, ['data-bind=', 'ko.observable('])).toEqual([
+      { file: 'src/signin.html', line: 2, text: '<input data-bind="value: username" />' },
+      { file: 'src/signin.ts', line: 1, text: 'this.username = ko.observable("");' },
+      { file: 'tests/signin.spec.ts', line: 1, text: 'ko.observable(1)' },
     ]);
   });
 });

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { EFFORTS, pickModel, RECOMMENDED_EFFORT, SLOT_LABELS, SLOTS } from './ai/modelPick';
+import { EFFORTS, effortFor, pickModel, RECOMMENDED_EFFORT, SLOT_LABELS, SLOTS } from './ai/modelPick';
 import { NO_PROVIDER_HELP, PROVIDER_NAMES } from './ai/providerChoice';
 import { ProviderRouter } from './ai/router';
 import { Explainer, ExplainTarget } from './learn/explain';
@@ -7,16 +7,17 @@ import { relPath } from './learn/files';
 import { TeachingHover } from './learn/hover';
 import { Lessons } from './learn/lessons';
 import { offerInterviewOnce, runInterview } from './profile/interview';
-import { collectFiles } from './scan/collect';
-import { changedFiles } from './scan/digest';
+import { changedSinceMap } from './scan/digest';
+import { RepoFiles } from './scan/repoFiles';
 import { Scanner } from './scan/scanner';
 import { reportError, Services } from './services';
 import { Store } from './store/store';
 import { UsageLog } from './store/usage';
 import { usageReport } from './store/usageReport';
 import type { ConceptStatus, RepoMap, Walkthrough } from './store/types';
-import { MapTree } from './ui/mapTree';
+import { MapTree, ModelsInUse } from './ui/mapTree';
 import { LearnPanel } from './ui/panel';
+import type { MapItemType } from './ui/render';
 import { WalkthroughController } from './walkthrough/controller';
 import { WalkthroughBuilder } from './walkthrough/generate';
 
@@ -34,7 +35,8 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   const store = new Store(context, vscode.workspace.workspaceFolders?.[0]);
   const usage = new UsageLog(context.globalStorageUri);
   const ai = new ProviderRouter(context, (entry) => void usage.record({ ...entry, repo: store.repoName }), log);
-  const services: Services = { context, store, ai, log };
+  const files = new RepoFiles(vscode.workspace.workspaceFolders?.[0]);
+  const services: Services = { context, store, ai, log, files };
 
   const lessons = new Lessons(services);
   const explainer = new Explainer(services);
@@ -74,7 +76,7 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   });
   walks = new WalkthroughController(services, () => panel);
 
-  const tree = new MapTree(store);
+  const tree = new MapTree(store, () => modelsInUse(ai));
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   status.text = '$(book) codelearn';
   status.command = 'codelearn.whatsHappening';
@@ -112,6 +114,7 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   context.subscriptions.push(
     log,
     usage,
+    files,
     panel,
     walks,
     status,
@@ -121,6 +124,23 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
 
     cmd('codelearn.buildMap', () => scanner.build('full')),
     cmd('codelearn.updateMap', () => scanner.build('update')),
+    cmd('codelearn.investigate', async () => {
+      const question = await vscode.window.showInputBox({
+        title: 'codelearn: investigate a question',
+        prompt: 'Ask how something in this repo works. codelearn follows it through the code (one AI request) and adds the answer to the map as a flow.',
+        placeHolder: 'e.g. How does signing in work? Where are emails sent?',
+        ignoreFocusOut: true,
+      });
+      if (!question?.trim()) return;
+      const flow = await scanner.investigate(question.trim());
+      if (flow) await panel.openMapItem('flow', flow.id);
+    }),
+    cmd('codelearn.exploreArea', async (arg: unknown) => {
+      // From the tree's inline button we get the tree node; from the panel, an area id.
+      const id = typeof arg === 'string' ? arg : ((arg as { item?: vscode.TreeItem })?.item?.id ?? '').replace(/^area:/, '');
+      const area = await scanner.exploreArea(id);
+      if (area) await panel.openMapItem('area', area.id);
+    }),
     cmd('codelearn.setupProfile', () => runInterview(store)),
     cmd('codelearn.chooseModels', () => chooseModels(ai)),
     cmd('codelearn.showUsage', async () => panel.showUsage(usageReport(await usage.all(), new Date()))),
@@ -157,7 +177,7 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
     }),
 
     cmd('codelearn.openLesson', (ref: string) => panel.openLesson(ref)),
-    cmd('codelearn.openMapItem', (type: 'overview' | 'area' | 'flow' | 'term' | 'convention', id: string) => panel.openMapItem(type, id)),
+    cmd('codelearn.openMapItem', (type: MapItemType, id: string) => panel.openMapItem(type, id)),
     cmd('codelearn.setConceptStatus', async (name: string, s: ConceptStatus) => {
       await store.setStatus(name, s);
       vscode.window.setStatusBarMessage(
@@ -205,18 +225,14 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   // the window regains focus, at most every few minutes.
   let lastCheck = 0;
   const checkFreshness = async () => {
-    const folder = vscode.workspace.workspaceFolders?.[0];
     const map = await store.getMap();
-    if (!folder || !map) return tree.setChanged(new Set());
+    if (!vscode.workspace.workspaceFolders?.[0] || !map) return tree.setChanged(new Set());
     lastCheck = Date.now();
-    const cts = new vscode.CancellationTokenSource();
     try {
-      const { hashes } = await collectFiles(folder, cts.token);
-      tree.setChanged(changedFiles(map.fileHashes, hashes));
+      const { hashes } = await files.refresh();
+      tree.setChanged(changedSinceMap(map, hashes));
     } catch (e) {
       log.warn(`Checking for changed files failed: ${e instanceof Error ? e.message : e}`);
-    } finally {
-      cts.dispose();
     }
   };
   const freshnessTimer = setTimeout(() => void checkFreshness(), context.extensionMode === vscode.ExtensionMode.Test ? 0 : 4000);
@@ -230,6 +246,19 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
   void store.getMap().then((map) => {
     void vscode.commands.executeCommand('setContext', 'codelearn.hasMap', !!map);
   });
+  // Which AI answers, for the sidebar's welcome text and its "AI models" line.
+  const aiChanged = async () => {
+    const id = await ai.current().catch(() => undefined);
+    void vscode.commands.executeCommand('setContext', 'codelearn.aiProvider', id ?? 'none');
+    tree.refresh();
+  };
+  void aiChanged();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('codelearn.provider') || e.affectsConfiguration('codelearn.models') || e.affectsConfiguration('codelearn.effort')) void aiChanged();
+    }),
+    vscode.lm.onDidChangeChatModels(() => void aiChanged()),
+  );
   let checkedMap: RepoMap | undefined;
   store.onDidChange(async () => {
     const m = await store.getMap();
@@ -245,6 +274,25 @@ export function activate(context: vscode.ExtensionContext): CodelearnTestApi {
 }
 
 export function deactivate(): void {}
+
+/** The provider and the model each job uses, as the settings resolve them right now. */
+async function modelsInUse(ai: ProviderRouter): Promise<ModelsInUse> {
+  const id = await ai.current();
+  if (!id) return { slots: [] };
+  const cfg = vscode.workspace.getConfiguration('codelearn');
+  const slots = await Promise.all(
+    SLOTS.map(async (slot) => {
+      const [name, job] = SLOT_LABELS[slot].split(': ');
+      return {
+        label: `**${name}** (${job})`,
+        model: (await ai.modelFor(slot).catch(() => undefined))?.name,
+        effort: effortFor(slot, cfg.get<string>(`effort.${slot}`, 'auto')),
+        auto: cfg.get<string>(`models.${slot}`, 'auto') === 'auto' && cfg.get<string>(`effort.${slot}`, 'auto') === 'auto',
+      };
+    }),
+  );
+  return { provider: PROVIDER_NAMES[id], slots };
+}
 
 async function chooseModels(ai: ProviderRouter): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('codelearn');

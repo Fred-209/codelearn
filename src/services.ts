@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { AIProvider } from './ai/provider';
 import { AIUnavailableError } from './ai/provider';
+import type { RepoFiles } from './scan/repoFiles';
 import type { Store } from './store/store';
 
 /** Shared by every feature. */
@@ -9,6 +10,8 @@ export interface Services {
   store: Store;
   ai: AIProvider;
   log: vscode.LogOutputChannel;
+  /** The repo's readable files, in memory. */
+  files: RepoFiles;
 }
 
 /** Shows an error the learner can act on, and logs the details. */

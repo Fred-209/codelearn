@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { classify, sampleOrder } from './classify';
+import { classify, pathPriority } from './classify';
 import type { RepoFile } from './digest';
 import { hash } from '../store/store';
 
@@ -10,7 +10,7 @@ export interface Collected {
   hashes: Record<string, string>;
 }
 
-/** Reads the files worth learning from: code, instruction files and manifests. */
+/** Reads the files worth learning from: code, templates, instruction files and manifests. */
 export async function collectFiles(folder: vscode.WorkspaceFolder, token: vscode.CancellationToken): Promise<Collected> {
   const cfg = vscode.workspace.getConfiguration('codelearn');
   const maxFiles = cfg.get<number>('scan.maxFiles', 1500);
@@ -22,13 +22,15 @@ export async function collectFiles(folder: vscode.WorkspaceFolder, token: vscode
     token,
   );
 
-  const rank = { instruction: 0, manifest: 1, code: 2, other: 3 } as const;
+  // Over the limit, keep the files that matter most rather than the first ones alphabetically.
   const candidates = uris
     .map((uri) => ({ uri, path: vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/') }))
     .map((c) => ({ ...c, role: classify(c.path) }))
     .filter((c) => c.role !== 'other')
-    .sort((a, b) => rank[a.role] - rank[b.role] || a.path.localeCompare(b.path))
-    .slice(0, maxFiles);
+    .map((c) => ({ ...c, priority: pathPriority(c.path, c.role) }))
+    .sort((a, b) => b.priority - a.priority || a.path.localeCompare(b.path))
+    .slice(0, maxFiles)
+    .sort((a, b) => a.path.localeCompare(b.path));
 
   const files: RepoFile[] = [];
   const hashes: Record<string, string> = {};
@@ -49,13 +51,19 @@ export async function collectFiles(folder: vscode.WorkspaceFolder, token: vscode
 }
 
 /**
- * Adds symbol outlines from installed language extensions to the files most likely
- * to be sampled. Language servers can be slow to start, so this is time-boxed.
+ * Adds symbol outlines from installed language extensions to the files most likely to be
+ * sampled (`order`, most important first). Language servers can be slow to start, so this
+ * is time-boxed.
  */
-export async function addOutlines(folder: vscode.WorkspaceFolder, files: RepoFile[], token: vscode.CancellationToken, budgetMs = 20_000): Promise<void> {
-  const code = files.filter((f) => classify(f.path) === 'code');
-  const order = sampleOrder(code.map((f) => ({ path: f.path, size: f.size }))).slice(0, 60);
-  const byPath = new Map(code.map((f) => [f.path, f]));
+export async function addOutlines(
+  folder: vscode.WorkspaceFolder,
+  files: RepoFile[],
+  ranked: string[],
+  token: vscode.CancellationToken,
+  budgetMs = 20_000,
+): Promise<void> {
+  const order = ranked.slice(0, 60);
+  const byPath = new Map(files.map((f) => [f.path, f]));
   const deadline = Date.now() + budgetMs;
   for (const path of order) {
     if (token.isCancellationRequested || Date.now() > deadline) return;

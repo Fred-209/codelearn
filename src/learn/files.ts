@@ -47,7 +47,7 @@ export async function openAt(root: vscode.Uri, file: string, line: number, colum
 }
 
 /** Waits for a language-extension command, giving up after `ms` (servers can be slow to start). */
-async function ask<T>(command: string, ms: number, ...args: unknown[]): Promise<T | undefined> {
+export async function ask<T>(command: string, ms: number, ...args: unknown[]): Promise<T | undefined> {
   try {
     return await Promise.race([
       vscode.commands.executeCommand<T>(command, ...args),
